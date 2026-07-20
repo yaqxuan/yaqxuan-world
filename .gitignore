@@ -1,0 +1,13 @@
+node_modules/
+dist/
+tmp/
+design/
+public/assets/*.png
+*Zone.Identifier
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+.DS_Store
+.env
+.env.*
+!.env.example
