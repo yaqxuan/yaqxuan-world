@@ -62,3 +62,12 @@ YAQXUAN_BASE_URL=http://localhost:4175 npm run qa:local
 - 生产分支：`main`
 
 `public/_redirects` 提供 SPA 直达路由回退；`public/_headers`、`robots.txt` 与 `sitemap.xml` 会随构建复制到 `dist`。
+
+### `www` 永久重定向
+
+`workers/www-redirect` 是独立的 Cloudflare Worker Custom Domain。它将
+`www.yaqxuan.com` 以 HTTP 301 永久重定向到 `https://yaqxuan.com`，并保留原始路径和查询参数。
+
+```bash
+npx wrangler deploy --config workers/www-redirect/wrangler.jsonc
+```

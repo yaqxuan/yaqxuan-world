@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yaqxuan-www-redirect",
+  "main": "index.js",
+  "compatibility_date": "2026-07-21",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "www.yaqxuan.com",
+      "custom_domain": true
+    }
+  ]
+}
