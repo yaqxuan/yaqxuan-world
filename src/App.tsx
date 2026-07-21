@@ -95,7 +95,7 @@ function useAmbientSound(enabled: boolean) {
     droneFilter.connect(master);
 
     const frequencies = [55, 82.5, 110, 165];
-    const oscillators = frequencies.map((frequency, index) => {
+    frequencies.forEach((frequency, index) => {
       const oscillator = context.createOscillator();
       const localGain = context.createGain();
       const lfo = context.createOscillator();
@@ -113,7 +113,6 @@ function useAmbientSound(enabled: boolean) {
       oscillator.start();
       lfo.start();
       sources.push(oscillator, lfo);
-      return oscillator;
     });
 
     const noiseBuffer = context.createBuffer(1, context.sampleRate * 4, context.sampleRate);
@@ -181,6 +180,7 @@ function Navigation({
           key={district.path}
           type="button"
           className={path === district.path ? "is-active" : ""}
+          aria-current={path === district.path ? "page" : undefined}
           onClick={() => onNavigate(district.path)}
         >
           <small>{district.index}</small>
@@ -190,6 +190,7 @@ function Navigation({
       <button
         type="button"
         className={path === "/about" ? "is-active" : ""}
+        aria-current={path === "/about" ? "page" : undefined}
         onClick={() => onNavigate("/about")}
       >
         <small>04</small>
@@ -279,9 +280,9 @@ function HomeOverlay({
   );
 }
 
-function LivingWorldOverlay() {
+function LivingWorldOverlay({ path }: { path: WorldPath }) {
   return (
-    <div className="living-world" aria-hidden="true">
+    <div className={`living-world living-${path.replace("/", "") || "home"}`} aria-hidden="true">
       <div className="moving-haze haze-a" />
       <div className="moving-haze haze-b" />
       <div className="sun-breath" />
@@ -305,6 +306,33 @@ function LivingWorldOverlay() {
           />
         ))}
       </div>
+      <div className="horizon-ripples">
+        <i />
+        <i />
+        <i />
+      </div>
+      <div className="paper-drift">
+        {Array.from({ length: 7 }, (_, index) => (
+          <i key={index} />
+        ))}
+      </div>
+      <div className="memory-echoes">
+        <i />
+        <i />
+        <i />
+      </div>
+      <div className="signal-field">
+        <i className="signal-outbound" />
+        <i className="signal-return" />
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="atelier-breeze">
+        <i />
+        <i />
+        <i />
+      </div>
     </div>
   );
 }
@@ -320,7 +348,13 @@ function DistrictExperience({
   const [chapterIndex, setChapterIndex] = useState(0);
   const [reading, setReading] = useState(false);
   const readingClose = useRef<HTMLButtonElement>(null);
+  const readingTrigger = useRef<HTMLButtonElement>(null);
+  const wasReading = useRef(false);
   const chapter = district.chapters[chapterIndex];
+
+  const closeReading = useCallback(() => {
+    setReading(false);
+  }, []);
 
   useEffect(() => {
     setChapterIndex(0);
@@ -330,8 +364,12 @@ function DistrictExperience({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        if (reading) setReading(false);
+        if (reading) closeReading();
         else onClose();
+      }
+      if (reading && event.key === "Tab") {
+        event.preventDefault();
+        readingClose.current?.focus();
       }
       if (!reading && event.key === "ArrowRight") {
         setChapterIndex((current) => Math.min(current + 1, district.chapters.length - 1));
@@ -342,14 +380,23 @@ function DistrictExperience({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [district.chapters.length, onClose, reading]);
+  }, [closeReading, district.chapters.length, onClose, reading]);
 
   useEffect(() => {
-    if (reading) readingClose.current?.focus();
+    if (reading) {
+      wasReading.current = true;
+      readingClose.current?.focus();
+    } else if (wasReading.current) {
+      wasReading.current = false;
+      readingTrigger.current?.focus();
+    }
   }, [reading]);
 
   return (
-    <section className="district-experience" aria-labelledby="district-title">
+    <section
+      className={`district-experience district-route-${path.slice(1)}${reading ? " is-reading" : ""}`}
+      aria-labelledby="district-title"
+    >
       <button className="close-region" type="button" onClick={onClose}>
         <ArrowLeft />
         返回城市入口
@@ -369,7 +416,12 @@ function DistrictExperience({
         <span className="chapter-eyebrow">{chapter.eyebrow}</span>
         <h2>{chapter.title}</h2>
         <p>{chapter.summary}</p>
-        <button className="read-chapter" type="button" onClick={() => setReading(true)}>
+        <button
+          ref={readingTrigger}
+          className="read-chapter"
+          type="button"
+          onClick={() => setReading(true)}
+        >
           展开阅读
           <ArrowRight />
         </button>
@@ -421,7 +473,7 @@ function DistrictExperience({
             ref={readingClose}
             className="reading-close"
             type="button"
-            onClick={() => setReading(false)}
+            onClick={closeReading}
             aria-label="关闭阅读层"
           >
             <X />
@@ -490,7 +542,12 @@ function UtilityBar({
 }) {
   return (
     <div className="utility-bar">
-      <button type="button" onClick={onToggleSound} aria-label={muted ? "开启声音" : "关闭声音"}>
+      <button
+        type="button"
+        onClick={onToggleSound}
+        aria-label={muted ? "开启声音" : "关闭声音"}
+        aria-pressed={!muted}
+      >
         {muted ? <VolumeX /> : <Volume2 />}
         <span>{muted ? "声音关闭" : "声音开启"}</span>
       </button>
@@ -620,6 +677,7 @@ function App() {
     if (window.location.pathname !== nextPath) {
       window.history.pushState({}, "", nextPath);
     }
+    setPreviewPath(null);
     setPath(nextPath);
     if (nextPath !== "/") {
       setStage("revealed");
@@ -630,6 +688,7 @@ function App() {
   useEffect(() => {
     const onPopState = () => {
       const nextPath = normalizePath(window.location.pathname);
+      setPreviewPath(null);
       setPath(nextPath);
       if (nextPath !== "/") setStage("revealed");
     };
@@ -722,7 +781,7 @@ function App() {
           <WorldScene path={path} stage={stage} />
         </Suspense>
       </SceneBoundary>
-      <LivingWorldOverlay />
+      <LivingWorldOverlay path={path} />
       <div className="dawn-bloom" aria-hidden="true" />
       <div className="world-vignette" aria-hidden="true" />
       <div className="world-grain" aria-hidden="true" />

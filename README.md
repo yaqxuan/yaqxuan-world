@@ -26,6 +26,21 @@ npm run build
 npm run preview
 ```
 
+首次运行浏览器验收前安装测试用 Chromium：
+
+```bash
+npx playwright-core install chromium
+npm run qa:local
+```
+
+验收生产预览时可指定地址：
+
+```bash
+YAQXUAN_BASE_URL=http://localhost:4175 npm run qa:local
+```
+
+验收会实际检查世界诞生、会话记忆、重新观看、区域路由、章节阅读层、键盘焦点、声音开关、窄屏静态页、减少动态效果和 WebGL 失败降级，并在 `tmp/qa/screens` 生成视觉截图。
+
 ## 体验原则
 
 - 桌面端提供实时三维世界诞生、区域切换、动态环境与可展开阅读层。

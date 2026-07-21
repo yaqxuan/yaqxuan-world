@@ -6,12 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "qa:local": "node scripts/qa-local.mjs"
   },
   "dependencies": {
     "@react-three/fiber": "^8.18.0",
     "lucide-react": "^0.468.0",
-    "motion": "^11.15.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "^0.185.1"
@@ -21,6 +21,7 @@
     "@types/react-dom": "^18.3.5",
     "@types/three": "^0.185.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "playwright-core": "^1.61.1",
     "typescript": "~5.7.2",
     "vite": "^6.0.7"
   }

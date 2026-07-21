@@ -298,155 +298,21 @@ function CityBuildings({ progress }: { progress: MutableRefObject<number> }) {
   );
 }
 
-function StreetHouse({
-  position,
-  side,
-  phase,
-  progress,
-}: {
-  position: [number, number, number];
-  side: -1 | 1;
-  phase: number;
-  progress: MutableRefObject<number>;
-}) {
-  const group = useRef<THREE.Group>(null);
-  const material = useRef<THREE.MeshStandardMaterial>(null);
-  const windowMaterial = useRef<THREE.MeshBasicMaterial>(null);
-
-  useFrame(() => {
-    const reveal = smooth((progress.current - phase) / 0.34);
-    if (group.current) {
-      group.current.scale.y = Math.max(0.001, reveal);
-      group.current.position.y = -1.15 * (1 - reveal);
-    }
-    if (material.current) material.current.opacity = reveal;
-    if (windowMaterial.current) windowMaterial.current.opacity = smooth((progress.current - 0.55) / 0.38);
-  });
-
-  return (
-    <group ref={group} position={position} rotation={[0, side < 0 ? 0.08 : -0.08, 0]}>
-      <mesh position={[0, 1.55, 0]}>
-        <boxGeometry args={[5.5, 3.1, 5.2]} />
-        <meshStandardMaterial
-          ref={material}
-          color={side < 0 ? "#87847b" : "#77766f"}
-          roughness={0.86}
-          transparent
-          opacity={0}
-        />
-      </mesh>
-      <mesh position={[side * -0.6, 3.45, -0.25]}>
-        <boxGeometry args={[4.1, 0.28, 5.8]} />
-        <meshStandardMaterial color="#343536" roughness={0.64} />
-      </mesh>
-      <mesh position={[side * -2.78, 2.15, 0.25]}>
-        <boxGeometry args={[0.16, 1.85, 3.7]} />
-        <meshStandardMaterial color="#4d4e4b" roughness={0.8} />
-      </mesh>
-      {[-1.25, 0.45].map((x, index) => (
-        <mesh key={x} position={[x, 1.72 + index * 0.18, side < 0 ? 2.63 : -2.63]}>
-          <boxGeometry args={[0.82, 0.92, 0.06]} />
-          <meshBasicMaterial
-            ref={index === 0 ? windowMaterial : undefined}
-            color="#ffc56d"
-            transparent
-            opacity={0}
-            toneMapped={false}
-          />
-        </mesh>
-      ))}
-      <group position={[side * -1.6, 3.8, 0.4]}>
-        <mesh>
-          <cylinderGeometry args={[0.08, 0.11, 2.2, 7]} />
-          <meshStandardMaterial color="#342a20" roughness={1} />
-        </mesh>
-        <mesh position={[0, 1.3, 0]}>
-          <sphereGeometry args={[0.85, 10, 8]} />
-          <meshStandardMaterial color="#43513e" roughness={1} />
-        </mesh>
-      </group>
-    </group>
-  );
-}
-
-function ForegroundStreet({ progress }: { progress: MutableRefObject<number> }) {
-  const road = useRef<THREE.Mesh>(null);
-  const roadMaterial = useRef<THREE.MeshStandardMaterial>(null);
-  const grid = useRef<THREE.GridHelper>(null);
-  const houses = useMemo(
-    () =>
-      Array.from({ length: 7 }, (_, index) => ({
-        z: -2 - index * 8.2,
-        phase: 0.12 + index * 0.045,
-      })),
-    [],
-  );
-
-  useFrame(() => {
-    const reveal = smooth((progress.current - 0.04) / 0.34);
-    if (road.current) {
-      road.current.scale.z = Math.max(0.001, reveal);
-      road.current.position.z = -58 * reveal;
-    }
-    if (roadMaterial.current) roadMaterial.current.opacity = reveal;
-    if (grid.current) {
-      const material = grid.current.material as THREE.Material;
-      material.opacity = 0.55 * (1 - smooth((progress.current - 0.18) / 0.56));
-      material.transparent = true;
-    }
-  });
-
-  return (
-    <group>
-      <mesh ref={road} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.5, 0]} scale={[1, 1, 0.001]}>
-        <planeGeometry args={[9.5, 120, 1, 1]} />
-        <meshStandardMaterial
-          ref={roadMaterial}
-          color="#454442"
-          roughness={0.94}
-          transparent
-          opacity={0}
-        />
-      </mesh>
-      <gridHelper
-        ref={grid}
-        args={[180, 100, "#b67b3a", "#5b4029"]}
-        position={[0, -0.46, -72]}
-      />
-      {houses.flatMap((house, index) => [
-        <StreetHouse
-          key={`left-${house.z}`}
-          position={[-10.2 - (index % 2) * 1.4, 0, house.z]}
-          side={-1}
-          phase={house.phase}
-          progress={progress}
-        />,
-        <StreetHouse
-          key={`right-${house.z}`}
-          position={[10.2 + ((index + 1) % 2) * 1.4, 0, house.z - 1.6]}
-          side={1}
-          phase={house.phase + 0.025}
-          progress={progress}
-        />,
-      ])}
-    </group>
-  );
-}
-
 function HorizonArc({ progress }: { progress: MutableRefObject<number> }) {
   const material = useRef<THREE.MeshBasicMaterial>(null);
   const mesh = useRef<THREE.Mesh>(null);
   const geometry = useMemo(() => {
     const points = Array.from({ length: 80 }, (_, index) => {
       const angle = THREE.MathUtils.lerp(Math.PI * 0.06, Math.PI * 0.94, index / 79);
-      return new THREE.Vector3(Math.cos(angle) * 48, Math.sin(angle) * 48, 0);
+      return new THREE.Vector3(Math.cos(angle) * 35, Math.sin(angle) * 35, 0);
     });
-    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 160, 0.16, 8, false);
+    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 160, 0.12, 8, false);
   }, []);
 
   useFrame((_, delta) => {
     const reveal = smooth((progress.current - 0.32) / 0.55);
-    if (material.current) material.current.opacity = reveal * 0.78;
+    const dissolve = 1 - smooth((progress.current - 0.76) / 0.2);
+    if (material.current) material.current.opacity = reveal * dissolve * 0.78;
     if (mesh.current) {
       mesh.current.rotation.z += delta * 0.004;
       mesh.current.scale.setScalar(0.94 + reveal * 0.06);
@@ -454,7 +320,7 @@ function HorizonArc({ progress }: { progress: MutableRefObject<number> }) {
   });
 
   return (
-    <mesh ref={mesh} geometry={geometry} position={[0, -5.5, -118]}>
+    <mesh ref={mesh} geometry={geometry} position={[0, -8.5, -118]}>
       <meshBasicMaterial
         ref={material}
         color="#f0cf93"
@@ -463,6 +329,60 @@ function HorizonArc({ progress }: { progress: MutableRefObject<number> }) {
         toneMapped={false}
       />
     </mesh>
+  );
+}
+
+function BirthRoad({ progress }: { progress: MutableRefObject<number> }) {
+  const road = useRef<THREE.Mesh>(null);
+  const roadMaterial = useRef<THREE.MeshBasicMaterial>(null);
+  const edgeMaterials = useRef<Array<THREE.MeshBasicMaterial | null>>([]);
+
+  useFrame(() => {
+    const reveal = smooth((progress.current - 0.08) / 0.38);
+    const dissolve = 1 - smooth((progress.current - 0.7) / 0.24);
+    if (road.current) {
+      road.current.scale.y = Math.max(0.001, reveal);
+      road.current.position.z = -58 * reveal;
+    }
+    if (roadMaterial.current) roadMaterial.current.opacity = reveal * dissolve * 0.34;
+    edgeMaterials.current.forEach((material) => {
+      if (material) material.opacity = reveal * dissolve * 0.72;
+    });
+  });
+
+  return (
+    <group>
+      <mesh
+        ref={road}
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, -0.42, 0]}
+        scale={[1, 0.001, 1]}
+      >
+        <planeGeometry args={[9.5, 118, 8, 54]} />
+        <meshBasicMaterial
+          ref={roadMaterial}
+          color="#b88a51"
+          wireframe
+          transparent
+          opacity={0}
+          depthWrite={false}
+        />
+      </mesh>
+      {[-4.8, 4.8].map((x, index) => (
+        <mesh key={x} position={[x, -0.36, -58]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[0.035, 118]} />
+          <meshBasicMaterial
+            ref={(material) => {
+              edgeMaterials.current[index] = material;
+            }}
+            color="#e8c27e"
+            transparent
+            opacity={0}
+            depthWrite={false}
+          />
+        </mesh>
+      ))}
+    </group>
   );
 }
 
@@ -514,141 +434,6 @@ function CreationParticles({ progress }: { progress: MutableRefObject<number> })
   );
 }
 
-function Traveler({ progress }: { progress: MutableRefObject<number> }) {
-  const group = useRef<THREE.Group>(null);
-
-  useFrame((state) => {
-    const reveal = smooth((progress.current - 0.02) / 0.24);
-    if (group.current) {
-      group.current.scale.setScalar(reveal);
-      group.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.55) * 0.012;
-    }
-  });
-
-  return (
-    <group ref={group} position={[0, 0.05, 4.2]} scale={0.001}>
-      <mesh position={[0, 1.65, 0]}>
-        <cylinderGeometry args={[0.42, 0.68, 1.72, 10]} />
-        <meshStandardMaterial color="#171b20" roughness={0.92} />
-      </mesh>
-      <mesh position={[0, 2.82, 0]}>
-        <sphereGeometry args={[0.42, 18, 14]} />
-        <meshStandardMaterial color="#151515" roughness={0.95} />
-      </mesh>
-      <mesh position={[-0.25, 0.48, 0]}>
-        <capsuleGeometry args={[0.12, 0.72, 6, 10]} />
-        <meshStandardMaterial color="#111419" roughness={0.95} />
-      </mesh>
-      <mesh position={[0.25, 0.48, 0]}>
-        <capsuleGeometry args={[0.12, 0.72, 6, 10]} />
-        <meshStandardMaterial color="#111419" roughness={0.95} />
-      </mesh>
-      <mesh position={[0.56, 1.7, 0]} rotation={[0, 0, -0.16]}>
-        <capsuleGeometry args={[0.1, 0.76, 6, 10]} />
-        <meshStandardMaterial color="#171b20" roughness={0.92} />
-      </mesh>
-      <mesh position={[-0.56, 1.7, 0]} rotation={[0, 0, 0.16]}>
-        <capsuleGeometry args={[0.1, 0.76, 6, 10]} />
-        <meshStandardMaterial color="#171b20" roughness={0.92} />
-      </mesh>
-    </group>
-  );
-}
-
-function UnknownWoman({ progress }: { progress: MutableRefObject<number> }) {
-  const group = useRef<THREE.Group>(null);
-  const head = useRef<THREE.Group>(null);
-  const hair = "#d6b66c";
-
-  useFrame((state) => {
-    const reveal = smooth((progress.current - 0.54) / 0.31);
-    const turn = smooth((progress.current - 0.77) / 0.2);
-    if (group.current) {
-      group.current.scale.setScalar(reveal * 0.82);
-      group.current.position.y = 0.05 + Math.sin(state.clock.elapsedTime * 0.68) * 0.018;
-    }
-    if (head.current) head.current.rotation.y = Math.PI * (1 - turn);
-  });
-
-  return (
-    <group ref={group} position={[1.45, 0.05, -25]} scale={0.001}>
-      <mesh position={[0, 1.55, 0]}>
-        <cylinderGeometry args={[0.38, 0.72, 1.9, 12]} />
-        <meshStandardMaterial color="#25282a" roughness={0.88} />
-      </mesh>
-      <mesh position={[-0.39, 1.68, 0]} rotation={[0, 0, 0.1]}>
-        <capsuleGeometry args={[0.085, 0.74, 6, 10]} />
-        <meshStandardMaterial color="#303234" roughness={0.9} />
-      </mesh>
-      <mesh position={[0.39, 1.68, 0]} rotation={[0, 0, -0.1]}>
-        <capsuleGeometry args={[0.085, 0.74, 6, 10]} />
-        <meshStandardMaterial color="#303234" roughness={0.9} />
-      </mesh>
-      <mesh position={[-0.21, 0.48, 0]}>
-        <capsuleGeometry args={[0.1, 0.7, 6, 10]} />
-        <meshStandardMaterial color="#17191b" roughness={0.95} />
-      </mesh>
-      <mesh position={[0.21, 0.48, 0]}>
-        <capsuleGeometry args={[0.1, 0.7, 6, 10]} />
-        <meshStandardMaterial color="#17191b" roughness={0.95} />
-      </mesh>
-      <mesh position={[0, 1.68, 0.365]} rotation={[0, 0, -0.32]}>
-        <boxGeometry args={[0.035, 1.45, 0.035]} />
-        <meshBasicMaterial color="#c49a50" />
-      </mesh>
-      <group ref={head} position={[0, 2.75, 0]} rotation={[0, Math.PI, 0]}>
-        <mesh>
-          <sphereGeometry args={[0.39, 20, 16]} />
-          <meshStandardMaterial color="#d4ab8d" roughness={0.72} />
-        </mesh>
-        <mesh position={[0, 0.11, -0.12]} scale={[1.08, 1.06, 0.86]}>
-          <sphereGeometry args={[0.39, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.72]} />
-          <meshStandardMaterial color={hair} roughness={0.86} />
-        </mesh>
-        <mesh position={[0.22, -0.03, -0.26]} rotation={[0.4, 0, -0.2]}>
-          <capsuleGeometry args={[0.11, 0.35, 6, 10]} />
-          <meshStandardMaterial color={hair} roughness={0.88} />
-        </mesh>
-        <mesh position={[-0.12, -0.04, 0.35]}>
-          <sphereGeometry args={[0.035, 8, 8]} />
-          <meshBasicMaterial color="#3c352e" />
-        </mesh>
-        <mesh position={[0.12, -0.04, 0.35]}>
-          <sphereGeometry args={[0.035, 8, 8]} />
-          <meshBasicMaterial color="#3c352e" />
-        </mesh>
-      </group>
-    </group>
-  );
-}
-
-function Sun({ progress }: { progress: MutableRefObject<number> }) {
-  const sun = useRef<THREE.Mesh>(null);
-  const material = useRef<THREE.MeshBasicMaterial>(null);
-
-  useFrame(() => {
-    const reveal = smooth((progress.current - 0.28) / 0.46);
-    if (sun.current) {
-      sun.current.position.y = THREE.MathUtils.lerp(-7, 12.5, reveal);
-      sun.current.scale.setScalar(THREE.MathUtils.lerp(0.25, 1.25, reveal));
-    }
-    if (material.current) material.current.opacity = reveal;
-  });
-
-  return (
-    <mesh ref={sun} position={[-18, -7, -122]}>
-      <sphereGeometry args={[2.2, 24, 18]} />
-      <meshBasicMaterial
-        ref={material}
-        color="#ffe4a7"
-        transparent
-        opacity={0}
-        toneMapped={false}
-      />
-    </mesh>
-  );
-}
-
 function World({ path, stage }: SceneProps) {
   const progress = useRef(stage === "seed" ? 0.018 : 1);
 
@@ -659,6 +444,8 @@ function World({ path, stage }: SceneProps) {
       <Atmosphere progress={progress} />
       <CameraRig path={path} stage={stage} progress={progress} />
       <CityBuildings progress={progress} />
+      <BirthRoad progress={progress} />
+      <HorizonArc progress={progress} />
       <CreationParticles progress={progress} />
     </>
   );
