@@ -422,8 +422,9 @@ function App() {
   if (ogMode) {
     const ogMeta = copy.routeMeta[ogRealm];
     return (
-      <div className={`og-capture-frame og-realm-${ogRealm}`}>
+      <div className={`og-capture-frame og-realm-${ogRealm}`} data-realm={ogRealm}>
         <div className="cosmos-backdrop">
+          <div className="cosmos-aurora-wash" />
           {webglSupported ? (
             <SceneBoundary fallback={<AstralStaticBackdrop activeRealm={ogRealm} />}>
               <Suspense fallback={null}>
@@ -439,6 +440,7 @@ function App() {
           ) : (
             <AstralStaticBackdrop activeRealm={ogRealm} />
           )}
+          <div className="astral-stars" />
           <div className="astral-vignette" />
         </div>
         <div className="og-card-content">
@@ -457,9 +459,10 @@ function App() {
   const nextLocale = otherLocale(locale);
 
   return (
-    <div className={`world-app locale-${locale}`} onPointerMove={handlePointerMove}>
+    <div className={`world-app locale-${locale}`} data-realm={activeRealm} onPointerMove={handlePointerMove}>
       {/* Persistent 3D World Backdrop */}
       <div className="cosmos-backdrop" aria-hidden="true">
+        <div className="cosmos-aurora-wash" />
         {webglSupported ? (
           <SceneBoundary fallback={<AstralStaticBackdrop activeRealm={activeRealm} />}>
             <Suspense fallback={<AstralStaticBackdrop activeRealm={activeRealm} />}>
@@ -599,7 +602,7 @@ function App() {
               <a
                 key={pillar.realm}
                 href={buildPath(locale, pillar.realm)}
-                className="pillar-card"
+                className={`pillar-card pillar-${pillar.realm}`}
                 onClick={(e) => navigateRealm(pillar.realm, e)}
               >
                 <div className="pillar-top">
@@ -622,7 +625,7 @@ function App() {
           <div className="editorial-column">
             <header className="realm-header">
               <div className="realm-badge-row">
-                <AstrolabeBadge index={copy.realms.imagine.index} />
+                <AstrolabeBadge index={copy.realms.imagine.index} variant="imagine" />
                 <span className="eyebrow">
                   {copy.realms.imagine.index} / {copy.realms.imagine.cue}
                 </span>
@@ -635,8 +638,8 @@ function App() {
             <ImagineConstellationDiagram nodes={copy.diagrams.imagineNodes} />
 
             <div className="chapter-stack">
-              {copy.realms.imagine.chapters.map((chapter) => (
-                <article key={chapter.eyebrow} className="chapter-card accent-cyan">
+              {copy.realms.imagine.chapters.map((chapter, idx) => (
+                <article key={chapter.eyebrow} className={`chapter-card accent-cyan accent-imagine-${idx}`}>
                   <span className="eyebrow">{chapter.eyebrow}</span>
                   <h3>{chapter.title}</h3>
                   <p className="chapter-summary">{chapter.summary}</p>
@@ -661,7 +664,7 @@ function App() {
           <div className="editorial-column">
             <header className="realm-header">
               <div className="realm-badge-row">
-                <AstrolabeBadge index={copy.realms.alive.index} />
+                <AstrolabeBadge index={copy.realms.alive.index} variant="alive" />
                 <span className="eyebrow">
                   {copy.realms.alive.index} / {copy.realms.alive.cue}
                 </span>
@@ -674,8 +677,8 @@ function App() {
             <AliveMemoryTriadDiagram rings={copy.diagrams.aliveRings} />
 
             <div className="chapter-stack">
-              {copy.realms.alive.chapters.map((chapter) => (
-                <article key={chapter.eyebrow} className="chapter-card accent-amber">
+              {copy.realms.alive.chapters.map((chapter, idx) => (
+                <article key={chapter.eyebrow} className={`chapter-card accent-amber accent-alive-${idx}`}>
                   <span className="eyebrow">{chapter.eyebrow}</span>
                   <h3>{chapter.title}</h3>
                   <p className="chapter-summary">{chapter.summary}</p>
@@ -700,7 +703,7 @@ function App() {
           <div className="editorial-column">
             <header className="realm-header">
               <div className="realm-badge-row">
-                <AstrolabeBadge index={copy.realms.connect.index} />
+                <AstrolabeBadge index={copy.realms.connect.index} variant="connect" />
                 <span className="eyebrow">
                   {copy.realms.connect.index} / {copy.realms.connect.cue}
                 </span>
@@ -711,8 +714,8 @@ function App() {
             </header>
 
             <div className="chapter-stack">
-              {copy.realms.connect.chapters.map((chapter) => (
-                <article key={chapter.eyebrow} className="chapter-card accent-violet">
+              {copy.realms.connect.chapters.map((chapter, idx) => (
+                <article key={chapter.eyebrow} className={`chapter-card accent-violet accent-connect-${idx}`}>
                   <span className="eyebrow">{chapter.eyebrow}</span>
                   <h3>{chapter.title}</h3>
                   <p className="chapter-summary">{chapter.summary}</p>
