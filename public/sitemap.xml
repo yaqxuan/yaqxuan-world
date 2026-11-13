@@ -1,8 +1,64 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://yaqxuan.com/</loc></url>
-  <url><loc>https://yaqxuan.com/imagine</loc></url>
-  <url><loc>https://yaqxuan.com/alive</loc></url>
-  <url><loc>https://yaqxuan.com/connect</loc></url>
-  <url><loc>https://yaqxuan.com/about</loc></url>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://yaqxuan.com/</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://yaqxuan.com/" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://yaqxuan.com/en" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://yaqxuan.com/" />
+  </url>
+  <url>
+    <loc>https://yaqxuan.com/imagine</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://yaqxuan.com/imagine" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://yaqxuan.com/en/imagine" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://yaqxuan.com/imagine" />
+  </url>
+  <url>
+    <loc>https://yaqxuan.com/alive</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://yaqxuan.com/alive" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://yaqxuan.com/en/alive" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://yaqxuan.com/alive" />
+  </url>
+  <url>
+    <loc>https://yaqxuan.com/connect</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://yaqxuan.com/connect" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://yaqxuan.com/en/connect" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://yaqxuan.com/connect" />
+  </url>
+  <url>
+    <loc>https://yaqxuan.com/about</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://yaqxuan.com/about" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://yaqxuan.com/en/about" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://yaqxuan.com/about" />
+  </url>
+  <url>
+    <loc>https://yaqxuan.com/en</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://yaqxuan.com/" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://yaqxuan.com/en" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://yaqxuan.com/" />
+  </url>
+  <url>
+    <loc>https://yaqxuan.com/en/imagine</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://yaqxuan.com/imagine" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://yaqxuan.com/en/imagine" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://yaqxuan.com/imagine" />
+  </url>
+  <url>
+    <loc>https://yaqxuan.com/en/alive</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://yaqxuan.com/alive" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://yaqxuan.com/en/alive" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://yaqxuan.com/alive" />
+  </url>
+  <url>
+    <loc>https://yaqxuan.com/en/connect</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://yaqxuan.com/connect" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://yaqxuan.com/en/connect" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://yaqxuan.com/connect" />
+  </url>
+  <url>
+    <loc>https://yaqxuan.com/en/about</loc>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://yaqxuan.com/about" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://yaqxuan.com/en/about" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://yaqxuan.com/about" />
+  </url>
 </urlset>

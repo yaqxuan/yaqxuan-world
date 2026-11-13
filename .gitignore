@@ -1,6 +1,8 @@
 node_modules/
 dist/
 tmp/
+.cache/
+.wrangler/
 design/
 public/assets/*.png
 *Zone.Identifier

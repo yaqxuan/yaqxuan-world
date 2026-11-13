@@ -1,11 +1,12 @@
 import {
-  ArrowLeft,
-  ArrowRight,
-  ExternalLink,
-  RotateCcw,
+  ArrowDown,
+  ArrowUpRight,
+  Check,
+  Copy,
+  Mail,
+  Sparkles,
   Volume2,
   VolumeX,
-  X,
 } from "lucide-react";
 import {
   Component,
@@ -16,27 +17,40 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent,
   type ReactNode,
 } from "react";
+import { CONTENT } from "./content";
 import {
-  districtList,
-  districtFromPath,
-  districts,
-  normalizePath,
-  routeMeta,
-  type DistrictPath,
-  type IntroStage,
-  type WorldPath,
-} from "./content";
-import { resolveLocale } from "./i18n";
+  AliveMemoryTriadDiagram,
+  AstralStaticBackdrop,
+  AstrolabeBadge,
+  ConnectRoadmap,
+  ImagineConstellationDiagram,
+} from "./diagrams";
+import {
+  buildPath,
+  otherLocale,
+  parseLocation,
+  REALM_IDS,
+  saveLocale,
+  type Locale,
+  type RealmId,
+} from "./i18n";
 
 const WorldScene = lazy(() =>
   import("./WorldScene").then((module) => ({ default: module.WorldScene })),
 );
 
-const SESSION_KEY = "yaqxuan:world-born";
+const REALM_FREQUENCIES: Record<RealmId, [number, number, number]> = {
+  home: [55, 82.5, 110],
+  imagine: [65.41, 98.0, 146.83],
+  alive: [58.27, 87.31, 130.81],
+  connect: [73.42, 110.0, 164.81],
+  about: [55, 82.5, 123.47],
+};
 
-class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+class SceneBoundary extends Component<{ children: ReactNode; fallback: ReactNode }, { failed: boolean }> {
   state = { failed: false };
 
   static getDerivedStateFromError() {
@@ -44,7 +58,7 @@ class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean
   }
 
   render() {
-    return this.state.failed ? null : this.props.children;
+    return this.state.failed ? this.props.fallback : this.props.children;
   }
 }
 
@@ -73,742 +87,725 @@ function supportsWebGL2() {
   }
 }
 
-function useAmbientSound(enabled: boolean) {
+function useAmbientSound(enabled: boolean, activeRealm: RealmId) {
+  const oscillatorsRef = useRef<OscillatorNode[]>([]);
+  const contextRef = useRef<AudioContext | null>(null);
+  const filterRef = useRef<BiquadFilterNode | null>(null);
+
   useEffect(() => {
     if (!enabled) return;
 
     const AudioContextCtor = window.AudioContext;
     if (!AudioContextCtor) return;
     const context = new AudioContextCtor();
+    contextRef.current = context;
+
     const master = context.createGain();
     const compressor = context.createDynamicsCompressor();
     master.gain.setValueAtTime(0, context.currentTime);
-    master.gain.linearRampToValueAtTime(0.034, context.currentTime + 2.8);
+    master.gain.linearRampToValueAtTime(0.032, context.currentTime + 2.2);
     master.connect(compressor);
     compressor.connect(context.destination);
 
-    const sources: AudioScheduledSourceNode[] = [];
-    const droneFilter = context.createBiquadFilter();
-    droneFilter.type = "lowpass";
-    droneFilter.frequency.value = 430;
-    droneFilter.Q.value = 0.6;
-    droneFilter.connect(master);
+    const filter = context.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 460;
+    filter.Q.value = 0.7;
+    filter.connect(master);
+    filterRef.current = filter;
 
-    const frequencies = [55, 82.5, 110, 165];
-    frequencies.forEach((frequency, index) => {
-      const oscillator = context.createOscillator();
-      const localGain = context.createGain();
+    const baseFreqs = REALM_FREQUENCIES[activeRealm];
+    const oscList: OscillatorNode[] = [];
+    const lfoList: OscillatorNode[] = [];
+
+    baseFreqs.forEach((freq, idx) => {
+      const osc = context.createOscillator();
+      const gain = context.createGain();
       const lfo = context.createOscillator();
       const lfoGain = context.createGain();
-      oscillator.type = index > 1 ? "sine" : "triangle";
-      oscillator.frequency.value = frequency;
-      oscillator.detune.value = [-5, 4, -9, 7][index];
-      localGain.gain.value = [0.15, 0.1, 0.055, 0.025][index];
-      lfo.frequency.value = 0.035 + index * 0.012;
-      lfoGain.gain.value = localGain.gain.value * 0.34;
+
+      osc.type = idx === 0 ? "triangle" : "sine";
+      osc.frequency.value = freq;
+      osc.detune.value = [-4, 5, -7][idx] ?? 0;
+      gain.gain.value = [0.16, 0.1, 0.055][idx] ?? 0.05;
+
+      lfo.frequency.value = 0.04 + idx * 0.015;
+      lfoGain.gain.value = gain.gain.value * 0.35;
+
       lfo.connect(lfoGain);
-      lfoGain.connect(localGain.gain);
-      oscillator.connect(localGain);
-      localGain.connect(droneFilter);
-      oscillator.start();
+      lfoGain.connect(gain.gain);
+      osc.connect(gain);
+      gain.connect(filter);
+
+      osc.start();
       lfo.start();
-      sources.push(oscillator, lfo);
+      oscList.push(osc);
+      lfoList.push(lfo);
     });
 
-    const noiseBuffer = context.createBuffer(1, context.sampleRate * 4, context.sampleRate);
-    const noiseData = noiseBuffer.getChannelData(0);
-    let memory = 0;
-    for (let index = 0; index < noiseData.length; index += 1) {
-      memory = memory * 0.985 + (Math.random() * 2 - 1) * 0.015;
-      noiseData[index] = memory;
-    }
-    const wind = context.createBufferSource();
-    const windFilter = context.createBiquadFilter();
-    const windGain = context.createGain();
-    wind.buffer = noiseBuffer;
-    wind.loop = true;
-    windFilter.type = "bandpass";
-    windFilter.frequency.value = 520;
-    windFilter.Q.value = 0.42;
-    windGain.gain.value = 0.12;
-    wind.connect(windFilter);
-    windFilter.connect(windGain);
-    windGain.connect(master);
-    wind.start();
-    sources.push(wind);
+    oscillatorsRef.current = oscList;
+
+    const onVisibility = () => {
+      if (document.hidden) {
+        void context.suspend();
+      } else {
+        void context.resume();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      oscillatorsRef.current = [];
+      filterRef.current = null;
+      contextRef.current = null;
+
       master.gain.cancelScheduledValues(context.currentTime);
-      master.gain.setTargetAtTime(0, context.currentTime, 0.24);
+      master.gain.setTargetAtTime(0, context.currentTime, 0.22);
       window.setTimeout(() => {
-        sources.forEach((source) => {
+        [...oscList, ...lfoList].forEach((node) => {
           try {
-            source.stop();
+            node.stop();
           } catch {
-            // The source may already have stopped while the audio context was closing.
+            // Oscillator already stopped.
           }
         });
         void context.close();
-      }, 850);
+      }, 650);
     };
   }, [enabled]);
-}
-
-function Brand({ onHome }: { onHome: () => void }) {
-  return (
-    <button className="brand" type="button" onClick={onHome} aria-label="返回世界入口">
-      <span className="brand-word">
-        <i />
-        YAQXUAN
-      </span>
-      <span className="brand-coordinate">WORLD / 00</span>
-    </button>
-  );
-}
-
-function Navigation({
-  path,
-  onNavigate,
-}: {
-  path: WorldPath;
-  onNavigate: (path: WorldPath) => void;
-}) {
-  return (
-    <nav className="world-navigation" aria-label="世界区域">
-      {districtList.map((district) => (
-        <button
-          key={district.path}
-          type="button"
-          className={path === district.path ? "is-active" : ""}
-          aria-current={path === district.path ? "page" : undefined}
-          onClick={() => onNavigate(district.path)}
-        >
-          <small>{district.index}</small>
-          <span>{district.title}</span>
-        </button>
-      ))}
-      <button
-        type="button"
-        className={path === "/about" ? "is-active" : ""}
-        aria-current={path === "/about" ? "page" : undefined}
-        onClick={() => onNavigate("/about")}
-      >
-        <small>04</small>
-        <span>关于</span>
-      </button>
-    </nav>
-  );
-}
-
-function BirthOverlay({
-  stage,
-  beat,
-  onStart,
-}: {
-  stage: IntroStage;
-  beat: number;
-  onStart: () => void;
-}) {
-  if (stage === "revealed") return null;
-  const beats = ["光先抵达。", "然后，是一条可以行走的路。", "最后，世界开始记住你。"];
-
-  return (
-    <div className={`birth-overlay birth-${stage}`}>
-      {stage === "seed" ? (
-        <button className="birth-trigger" type="button" onClick={onStart}>
-          <span className="seed-orbit" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </span>
-          <small>一个尚未存在的世界</small>
-          <strong>靠近，让它看见你。</strong>
-          <em>点击唤醒</em>
-        </button>
-      ) : (
-        <div className="birth-beat" key={beat}>
-          <span>0{beat + 1}</span>
-          <p>{beats[beat]}</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function HomeOverlay({
-  onNavigate,
-  onPreview,
-}: {
-  onNavigate: (path: WorldPath) => void;
-  onPreview: (path: WorldPath | null) => void;
-}) {
-  return (
-    <section className="home-overlay" aria-labelledby="home-title">
-      <div className="hero-statement">
-        <span className="hero-eyebrow">A WORLD THAT REMEMBERS / 00</span>
-        <h1 id="home-title">
-          <span>让想象成为</span>
-          <em>可以进入的世界。</em>
-        </h1>
-        <p>不是观看另一个世界，而是在其中被看见、被记住，并留下真实发生过的历史。</p>
-      </div>
-
-      <div className="district-rail" aria-label="进入城市区域">
-        <div className="rail-intro">
-          <small>向城市深处</small>
-          <span />
-        </div>
-        {districtList.map((district) => (
-          <button
-            key={district.path}
-            type="button"
-            onClick={() => onNavigate(district.path)}
-            onPointerEnter={() => onPreview(district.path)}
-            onPointerLeave={() => onPreview(null)}
-            onFocus={() => onPreview(district.path)}
-            onBlur={() => onPreview(null)}
-          >
-            <span>{district.index}</span>
-            <strong>{district.title}</strong>
-            <small>{district.cue}</small>
-            <ArrowRight aria-hidden="true" />
-          </button>
-        ))}
-      </div>
-
-    </section>
-  );
-}
-
-function LivingWorldOverlay({ path }: { path: WorldPath }) {
-  return (
-    <div className={`living-world living-${path.replace("/", "") || "home"}`} aria-hidden="true">
-      <div className="moving-haze haze-a" />
-      <div className="moving-haze haze-b" />
-      <div className="sun-breath" />
-      <div className="bird-flock">
-        <i />
-        <i />
-        <i />
-        <i />
-        <i />
-      </div>
-      <div className="city-embers">
-        {Array.from({ length: 18 }, (_, index) => (
-          <i
-            key={index}
-            style={{
-              left: `${24 + ((index * 19) % 61)}%`,
-              top: `${49 + ((index * 13) % 32)}%`,
-              animationDelay: `${(index % 7) * -0.73}s`,
-              animationDuration: `${2.7 + (index % 5) * 0.8}s`,
-            }}
-          />
-        ))}
-      </div>
-      <div className="horizon-ripples">
-        <i />
-        <i />
-        <i />
-      </div>
-      <div className="paper-drift">
-        {Array.from({ length: 7 }, (_, index) => (
-          <i key={index} />
-        ))}
-      </div>
-      <div className="memory-echoes">
-        <i />
-        <i />
-        <i />
-      </div>
-      <div className="signal-field">
-        <i className="signal-outbound" />
-        <i className="signal-return" />
-        <span />
-        <span />
-        <span />
-      </div>
-      <div className="atelier-breeze">
-        <i />
-        <i />
-        <i />
-      </div>
-    </div>
-  );
-}
-
-function DistrictExperience({
-  path,
-  onClose,
-}: {
-  path: DistrictPath;
-  onClose: () => void;
-}) {
-  const district = districtFromPath(path);
-  const [chapterIndex, setChapterIndex] = useState(0);
-  const [reading, setReading] = useState(false);
-  const readingClose = useRef<HTMLButtonElement>(null);
-  const readingTrigger = useRef<HTMLButtonElement>(null);
-  const wasReading = useRef(false);
-  const chapter = district.chapters[chapterIndex];
-
-  const closeReading = useCallback(() => {
-    setReading(false);
-  }, []);
 
   useEffect(() => {
-    setChapterIndex(0);
-    setReading(false);
-  }, [path]);
+    const context = contextRef.current;
+    const filter = filterRef.current;
+    if (!enabled || !context || !filter) return;
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        if (reading) closeReading();
-        else onClose();
-      }
-      if (reading && event.key === "Tab") {
-        event.preventDefault();
-        readingClose.current?.focus();
-      }
-      if (!reading && event.key === "ArrowRight") {
-        setChapterIndex((current) => Math.min(current + 1, district.chapters.length - 1));
-      }
-      if (!reading && event.key === "ArrowLeft") {
-        setChapterIndex((current) => Math.max(current - 1, 0));
-      }
+    const targetFreqs = REALM_FREQUENCIES[activeRealm];
+    const now = context.currentTime;
+    oscillatorsRef.current.forEach((osc, idx) => {
+      osc.frequency.setTargetAtTime(targetFreqs[idx] ?? 110, now, 0.9);
+    });
+    const cutoffMap: Record<RealmId, number> = {
+      home: 420,
+      imagine: 560,
+      alive: 490,
+      connect: 640,
+      about: 390,
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeReading, district.chapters.length, onClose, reading]);
-
-  useEffect(() => {
-    if (reading) {
-      wasReading.current = true;
-      readingClose.current?.focus();
-    } else if (wasReading.current) {
-      wasReading.current = false;
-      readingTrigger.current?.focus();
-    }
-  }, [reading]);
-
-  return (
-    <section
-      className={`district-experience district-route-${path.slice(1)}${reading ? " is-reading" : ""}`}
-      aria-labelledby="district-title"
-    >
-      <button className="close-region" type="button" onClick={onClose}>
-        <ArrowLeft />
-        返回城市入口
-      </button>
-
-      <div className="district-intro">
-        <div className="district-index">
-          <span>{district.index}</span>
-          <i />
-          <small>{district.cue}</small>
-        </div>
-        <h1 id="district-title">{district.title}</h1>
-        <p>{district.lead}</p>
-      </div>
-
-      <div className="chapter-stage" key={`${path}-${chapterIndex}`} aria-live="polite">
-        <span className="chapter-eyebrow">{chapter.eyebrow}</span>
-        <h2>{chapter.title}</h2>
-        <p>{chapter.summary}</p>
-        <button
-          ref={readingTrigger}
-          className="read-chapter"
-          type="button"
-          onClick={() => setReading(true)}
-        >
-          展开阅读
-          <ArrowRight />
-        </button>
-      </div>
-
-      <div className="chapter-navigation" aria-label={`${district.title}区域章节`}>
-        {district.chapters.map((item, index) => (
-          <button
-            key={item.eyebrow}
-            type="button"
-            className={chapterIndex === index ? "is-active" : ""}
-            onClick={() => setChapterIndex(index)}
-            aria-label={`第 ${index + 1} 章：${item.title}`}
-          >
-            <span>0{index + 1}</span>
-            <i />
-            <small>{item.eyebrow.split(" / ")[0]}</small>
-          </button>
-        ))}
-      </div>
-
-      <div className="chapter-arrows">
-        <button
-          type="button"
-          disabled={chapterIndex === 0}
-          onClick={() => setChapterIndex((current) => Math.max(0, current - 1))}
-          aria-label="上一章"
-        >
-          <ArrowLeft />
-        </button>
-        <span>
-          0{chapterIndex + 1} / 0{district.chapters.length}
-        </span>
-        <button
-          type="button"
-          disabled={chapterIndex === district.chapters.length - 1}
-          onClick={() =>
-            setChapterIndex((current) => Math.min(district.chapters.length - 1, current + 1))
-          }
-          aria-label="下一章"
-        >
-          <ArrowRight />
-        </button>
-      </div>
-
-      {reading && (
-        <div className="reading-layer" role="dialog" aria-modal="true" aria-labelledby="reading-title">
-          <button
-            ref={readingClose}
-            className="reading-close"
-            type="button"
-            onClick={closeReading}
-            aria-label="关闭阅读层"
-          >
-            <X />
-          </button>
-          <article>
-            <span>{chapter.eyebrow}</span>
-            <h2 id="reading-title">{chapter.title}</h2>
-            {chapter.body.map((paragraph) => (
-              <p key={paragraph}>{paragraph}</p>
-            ))}
-            {chapter.aside && <blockquote>{chapter.aside}</blockquote>}
-          </article>
-          <div className="reading-progress" aria-hidden="true">
-            <span>{district.title}</span>
-            <strong>0{chapterIndex + 1}</strong>
-            <i />
-            <small>0{district.chapters.length}</small>
-          </div>
-        </div>
-      )}
-    </section>
-  );
+    filter.frequency.setTargetAtTime(cutoffMap[activeRealm], now, 0.9);
+  }, [activeRealm, enabled]);
 }
 
-function AboutOverlay({ onClose }: { onClose: () => void }) {
-  return (
-    <section className="about-overlay" aria-labelledby="about-title">
-      <button className="close-region" type="button" onClick={onClose}>
-        <X />
-        关闭
-      </button>
-      <div className="about-copy">
-        <span>ABOUT / 由谁开始</span>
-        <h1 id="about-title">一项从想象出发的个人长期探索。</h1>
-        <p>
-          YAQXUAN 由 Yaqxuan 发起。它目前处于愿景与学习阶段，尝试理解怎样让故事、角色、空间和人的意图真正连接起来。
-        </p>
-        <p>
-          网站呈现方向，博客记录学习、实验、失败和逐渐形成的答案。这里没有虚构团队，也不把尚未发生的未来描述成已经完成的成果。
-        </p>
-      </div>
-      <div className="about-links">
-        <a href="https://yaqxuan.xyz" target="_blank" rel="noreferrer">
-          <span>研究与思考日志</span>
-          <strong>yaqxuan.xyz</strong>
-          <ExternalLink />
-        </a>
-        <a href="mailto:hello@yaqxuan.com">
-          <span>联系</span>
-          <strong>hello@yaqxuan.com</strong>
-          <ArrowRight />
-        </a>
-      </div>
-    </section>
-  );
+function updateDocumentMeta(locale: Locale, realm: RealmId) {
+  const meta = CONTENT[locale].routeMeta[realm];
+  const canonicalUrl = `https://yaqxuan.com${buildPath(locale, realm)}`;
+
+  document.title = meta.title;
+  document.documentElement.lang = locale;
+  document.querySelector('meta[name="description"]')?.setAttribute("content", meta.description);
+  document.querySelector('meta[property="og:title"]')?.setAttribute("content", meta.title);
+  document.querySelector('meta[property="og:description"]')?.setAttribute("content", meta.description);
+  document.querySelector('meta[property="og:url"]')?.setAttribute("content", canonicalUrl);
+
+  let canonicalLink = document.querySelector('link[rel="canonical"]');
+  if (!canonicalLink) {
+    canonicalLink = document.createElement("link");
+    canonicalLink.setAttribute("rel", "canonical");
+    document.head.appendChild(canonicalLink);
+  }
+  canonicalLink.setAttribute("href", canonicalUrl);
 }
 
-function UtilityBar({
-  muted,
-  onToggleSound,
-  onReplay,
-}: {
-  muted: boolean;
-  onToggleSound: () => void;
-  onReplay: () => void;
-}) {
-  return (
-    <div className="utility-bar">
-      <button
-        type="button"
-        onClick={onToggleSound}
-        aria-label={muted ? "开启声音" : "关闭声音"}
-        aria-pressed={!muted}
-      >
-        {muted ? <VolumeX /> : <Volume2 />}
-        <span>{muted ? "声音关闭" : "声音开启"}</span>
-      </button>
-      <button type="button" onClick={onReplay}>
-        <RotateCcw />
-        <span>重新观看</span>
-      </button>
-    </div>
-  );
-}
-
-function StaticExperience({
-  path,
-  reason,
-  onNavigate,
-}: {
-  path: WorldPath;
-  reason: "narrow" | "reduced" | "webgl";
-  onNavigate: (path: WorldPath) => void;
-}) {
-  const current =
-    path === "/imagine"
-      ? districts.imagine
-      : path === "/alive"
-        ? districts.alive
-        : path === "/connect"
-          ? districts.connect
-          : null;
-  const staticImage =
-    path === "/imagine"
-      ? "/assets/world-imagine-anime.webp"
-      : path === "/alive"
-        ? "/assets/world-alive-anime.webp"
-        : path === "/connect"
-          ? "/assets/world-connect-anime.webp"
-          : path === "/about"
-            ? "/assets/world-about-anime.webp"
-            : "/assets/world-home-anime.webp";
-
-  return (
-    <main className="static-experience">
-      <img src={staticImage} alt="" />
-      <div className="static-shade" />
-      <Brand onHome={() => onNavigate("/")} />
-      <div className="static-copy">
-        <span>YAQXUAN / STATIC VIEW</span>
-        <h1>
-          {current
-            ? current.title
-            : path === "/about"
-              ? "一项从想象出发的个人长期探索。"
-              : "让想象成为可以进入的世界。"}
-        </h1>
-        <p>
-          {current
-            ? current.copy
-            : path === "/about"
-              ? "YAQXUAN 由 Yaqxuan 发起，目前处于愿景与学习阶段。"
-              : "一座从想象中诞生、能够被进入、被改变，也能够记住你的个人世界。"}
-        </p>
-        <small>
-          {reason === "narrow"
-            ? "完整实时 3D 体验为桌面屏幕设计。"
-            : reason === "reduced"
-              ? "已根据系统设置关闭动态三维体验。"
-              : "当前浏览器或图形设备无法运行 WebGL 2。"}
-        </small>
-      </div>
-      <div className="static-links">
-        {districtList.map((district) => (
-          <button key={district.path} type="button" onClick={() => onNavigate(district.path)}>
-            <span>{district.index}</span>
-            <strong>{district.title}</strong>
-          </button>
-        ))}
-        <button type="button" onClick={() => onNavigate("/about")}>
-          <span>04</span>
-          <strong>关于</strong>
-        </button>
-      </div>
-    </main>
-  );
-}
+const REALM_SCROLL_INDEX: Record<RealmId, number> = {
+  home: 0,
+  imagine: 0.25,
+  alive: 0.5,
+  connect: 0.75,
+  about: 1,
+};
 
 function App() {
-  const locale = useMemo(resolveLocale, []);
-  const [path, setPath] = useState<WorldPath>(() => normalizePath(window.location.pathname));
-  const [stage, setStage] = useState<IntroStage>(() => {
-    if (new URLSearchParams(window.location.search).get("preview") === "1") return "revealed";
-    if (window.location.pathname !== "/") return "revealed";
-    return sessionStorage.getItem(SESSION_KEY) ? "revealed" : "seed";
-  });
-  const [birthBeat, setBirthBeat] = useState(0);
-  const [muted, setMuted] = useState(true);
-  const [previewPath, setPreviewPath] = useState<WorldPath | null>(null);
-  const [loadedVisuals, setLoadedVisuals] = useState<Set<WorldPath>>(
-    () => new Set<WorldPath>(["/", normalizePath(window.location.pathname)]),
-  );
-  const shell = useRef<HTMLDivElement>(null);
-  const narrow = useMediaQuery("(max-width: 900px)");
-  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
-  const webgl = useMemo(() => supportsWebGL2(), []);
-  const force3DPreview = useMemo(
-    () =>
-      new URLSearchParams(window.location.search).get("force3d") === "1" ||
-      new URLSearchParams(window.location.search).get("preview") === "1",
+  const initialParsed = useMemo(
+    () => parseLocation(window.location.pathname, window.location.search),
     [],
   );
+  const searchParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const ogMode = searchParams.get("og") === "1";
+  const ogRealm = (searchParams.get("realm") as RealmId | null) ?? initialParsed.realm;
 
-  useAmbientSound(!muted);
+  const [locale, setLocale] = useState<Locale>(initialParsed.locale);
+  const [activeRealm, setActiveRealm] = useState<RealmId>(ogMode ? ogRealm : initialParsed.realm);
+  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [pulsed, setPulsed] = useState(false);
+  const [copiedEmail, setCopiedEmail] = useState(false);
+  const [scrollUiProgress, setScrollUiProgress] = useState(() =>
+    ogMode ? REALM_SCROLL_INDEX[ogRealm] : REALM_SCROLL_INDEX[initialParsed.realm],
+  );
 
-  useEffect(() => {
-    document.documentElement.lang = locale;
-  }, [locale]);
+  const isMobile = useMediaQuery("(max-width: 900px)");
+  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const webglSupported = useMemo(() => supportsWebGL2(), []);
 
-  useEffect(() => {
-    const visualPath = previewPath ?? path;
-    setLoadedVisuals((current) => {
-      if (current.has(visualPath)) return current;
-      const next = new Set(current);
-      next.add(visualPath);
-      return next;
-    });
-  }, [path, previewPath]);
+  const scrollProgressRef = useRef(
+    ogMode ? REALM_SCROLL_INDEX[ogRealm] : REALM_SCROLL_INDEX[initialParsed.realm],
+  );
+  const pointerRef = useRef({ x: 0, y: 0 });
+  const pulseTimeRef = useRef(0);
+  const lockSyncUntilRef = useRef(0);
+  const activeRealmRef = useRef<RealmId>(activeRealm);
+  const localeRef = useRef<Locale>(locale);
 
-  const navigate = useCallback((nextPath: WorldPath) => {
-    if (window.location.pathname !== nextPath) {
-      window.history.pushState({}, "", nextPath);
-    }
-    setPreviewPath(null);
-    setPath(nextPath);
-    if (nextPath !== "/") {
-      setStage("revealed");
-      sessionStorage.setItem(SESSION_KEY, "1");
-    }
+  activeRealmRef.current = activeRealm;
+  localeRef.current = locale;
+
+  useAmbientSound(soundEnabled && !ogMode, activeRealm);
+
+  const copy = CONTENT[locale];
+
+  const triggerPulse = useCallback(() => {
+    pulseTimeRef.current = performance.now();
+    setPulsed(true);
+    window.setTimeout(() => setPulsed(false), 2400);
   }, []);
 
+  const scrollToRealm = useCallback(
+    (realm: RealmId, instant = false) => {
+      const targetEl = document.getElementById(`section-${realm}`);
+      if (!targetEl) return;
+
+      lockSyncUntilRef.current = performance.now() + (instant ? 120 : 900);
+      setActiveRealm(realm);
+      activeRealmRef.current = realm;
+
+      if (realm === "home") {
+        window.scrollTo({ top: 0, behavior: instant || reducedMotion ? "auto" : "smooth" });
+      } else {
+        targetEl.scrollIntoView({
+          behavior: instant || reducedMotion ? "auto" : "smooth",
+          block: "start",
+        });
+      }
+    },
+    [reducedMotion],
+  );
+
+  const navigateRealm = useCallback(
+    (realm: RealmId, event?: MouseEvent<HTMLAnchorElement>) => {
+      if (event) {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+          return;
+        }
+        event.preventDefault();
+      }
+      const nextUrl = buildPath(localeRef.current, realm);
+      if (window.location.pathname !== nextUrl) {
+        window.history.pushState({}, "", nextUrl);
+      }
+      scrollToRealm(realm, false);
+      updateDocumentMeta(localeRef.current, realm);
+    },
+    [scrollToRealm],
+  );
+
+  const handleToggleLocale = useCallback((event: MouseEvent<HTMLAnchorElement>) => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    const nextLocale = otherLocale(localeRef.current);
+    setLocale(nextLocale);
+    localeRef.current = nextLocale;
+    saveLocale(nextLocale);
+
+    const nextPath = buildPath(nextLocale, activeRealmRef.current);
+    window.history.pushState({}, "", nextPath);
+    updateDocumentMeta(nextLocale, activeRealmRef.current);
+  }, []);
+
+  // Scroll to initial section if landed directly on /imagine, /alive, /connect, or /about
   useEffect(() => {
+    if (ogMode) return;
+    if (initialParsed.realm !== "home") {
+      window.requestAnimationFrame(() => {
+        scrollToRealm(initialParsed.realm, true);
+      });
+    }
+    updateDocumentMeta(initialParsed.locale, initialParsed.realm);
+  }, [initialParsed.locale, initialParsed.realm, ogMode, scrollToRealm]);
+
+  // Listen to browser Back / Forward
+  useEffect(() => {
+    if (ogMode) return;
     const onPopState = () => {
-      const nextPath = normalizePath(window.location.pathname);
-      setPreviewPath(null);
-      setPath(nextPath);
-      if (nextPath !== "/") setStage("revealed");
+      const parsed = parseLocation(window.location.pathname, window.location.search);
+      setLocale(parsed.locale);
+      localeRef.current = parsed.locale;
+      saveLocale(parsed.locale);
+      scrollToRealm(parsed.realm, true);
+      updateDocumentMeta(parsed.locale, parsed.realm);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [ogMode, scrollToRealm]);
 
+  // Single rAF-throttled scroll tracker driving both 3D spline and clean URL sync
   useEffect(() => {
-    const meta = routeMeta[path];
-    document.title = meta.title;
-    document.querySelector('meta[name="description"]')?.setAttribute("content", meta.description);
-  }, [path]);
+    if (ogMode) return;
+    let frameId = 0;
 
-  useEffect(() => {
-    if (stage !== "birthing") return;
-    const beatOne = window.setTimeout(() => setBirthBeat(1), 2100);
-    const beatTwo = window.setTimeout(() => setBirthBeat(2), 4200);
-    const finish = window.setTimeout(() => {
-      setStage("revealed");
-      sessionStorage.setItem(SESSION_KEY, "1");
-    }, 6800);
-    return () => {
-      window.clearTimeout(beatOne);
-      window.clearTimeout(beatTwo);
-      window.clearTimeout(finish);
+    const updateFromScroll = () => {
+      frameId = 0;
+      const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+      const ratio = docHeight > 0 ? Math.min(1, Math.max(0, window.scrollY / docHeight)) : 0;
+      scrollProgressRef.current = ratio;
+      setScrollUiProgress(ratio);
+
+      if (performance.now() < lockSyncUntilRef.current) return;
+
+      const marker = window.innerHeight * 0.42;
+      let detected: RealmId = "home";
+      for (const id of REALM_IDS) {
+        const el = document.getElementById(`section-${id}`);
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.top <= marker) {
+          detected = id;
+        }
+      }
+
+      if (detected !== activeRealmRef.current) {
+        setActiveRealm(detected);
+        activeRealmRef.current = detected;
+        const nextUrl = buildPath(localeRef.current, detected);
+        if (window.location.pathname !== nextUrl) {
+          window.history.replaceState({}, "", nextUrl);
+        }
+        updateDocumentMeta(localeRef.current, detected);
+      }
     };
-  }, [stage]);
 
-  const startBirth = useCallback(() => {
-    if (stage !== "seed") return;
-    setBirthBeat(0);
-    setStage("birthing");
-  }, [stage]);
+    const onScroll = () => {
+      if (!frameId) {
+        frameId = window.requestAnimationFrame(updateFromScroll);
+      }
+    };
 
-  const replay = useCallback(() => {
-    navigate("/");
-    setBirthBeat(0);
-    setStage("seed");
-    window.setTimeout(() => setStage("birthing"), 420);
-  }, [navigate]);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    updateFromScroll();
+
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      if (frameId) window.cancelAnimationFrame(frameId);
+    };
+  }, [ogMode]);
 
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (!shell.current) return;
-    shell.current.style.setProperty("--pointer-x", `${event.clientX}px`);
-    shell.current.style.setProperty("--pointer-y", `${event.clientY}px`);
-    const x = (event.clientX / window.innerWidth - 0.5) * -12;
-    const y = (event.clientY / window.innerHeight - 0.5) * -7;
-    shell.current.style.setProperty("--parallax-x", `${x}px`);
-    shell.current.style.setProperty("--parallax-y", `${y}px`);
+    const nx = (event.clientX / window.innerWidth) * 2 - 1;
+    const ny = -((event.clientY / window.innerHeight) * 2 - 1);
+    pointerRef.current.x = nx;
+    pointerRef.current.y = ny;
   }, []);
 
-  const fallbackReason = force3DPreview
-    ? null
-    : narrow
-      ? "narrow"
-      : reducedMotion
-        ? "reduced"
-        : !webgl
-          ? "webgl"
-          : null;
-  if (fallbackReason) {
-    return <StaticExperience path={path} reason={fallbackReason} onNavigate={navigate} />;
+  const handleCopyEmail = useCallback(() => {
+    const email = copy.about.links.email.value;
+    void navigator.clipboard?.writeText(email).then(() => {
+      setCopiedEmail(true);
+      window.setTimeout(() => setCopiedEmail(false), 2000);
+    });
+  }, [copy.about.links.email.value]);
+
+  const activeIndexStr =
+    copy.nav.items.find((item) => item.id === activeRealm)?.index ?? "00";
+
+  if (ogMode) {
+    const ogMeta = copy.routeMeta[ogRealm];
+    return (
+      <div className={`og-capture-frame og-realm-${ogRealm}`}>
+        <div className="cosmos-backdrop">
+          {webglSupported ? (
+            <SceneBoundary fallback={<AstralStaticBackdrop activeRealm={ogRealm} />}>
+              <Suspense fallback={null}>
+                <WorldScene
+                  scrollProgressRef={scrollProgressRef}
+                  pointerRef={pointerRef}
+                  pulseTimeRef={pulseTimeRef}
+                  isMobile={false}
+                  reducedMotion={true}
+                />
+              </Suspense>
+            </SceneBoundary>
+          ) : (
+            <AstralStaticBackdrop activeRealm={ogRealm} />
+          )}
+          <div className="astral-vignette" />
+        </div>
+        <div className="og-card-content">
+          <div className="og-brand">
+            <span className="brand-mark" />
+            <strong>YAQXUAN.COM</strong>
+          </div>
+          <span className="og-eyebrow">{ogMeta.ogEyebrow}</span>
+          <h1>{ogMeta.ogHeadline}</h1>
+          <p>{ogMeta.description}</p>
+        </div>
+      </div>
+    );
   }
 
-  return (
-    <div
-      ref={shell}
-      className={`world-shell stage-${stage} route-${path.replace("/", "") || "home"} ${
-        previewPath ? `preview-${previewPath.replace("/", "")}` : ""
-      }`}
-      onPointerMove={handlePointerMove}
-    >
-      <div className="world-plate world-plate-home" aria-hidden="true">
-        <img src="/assets/world-home-anime.webp" alt="" />
-      </div>
-      <div className="world-plate world-plate-imagine" aria-hidden="true">
-        {loadedVisuals.has("/imagine") && <img src="/assets/world-imagine-anime.webp" alt="" />}
-      </div>
-      <div className="world-plate world-plate-alive" aria-hidden="true">
-        {loadedVisuals.has("/alive") && <img src="/assets/world-alive-anime.webp" alt="" />}
-      </div>
-      <div className="world-plate world-plate-connect" aria-hidden="true">
-        {loadedVisuals.has("/connect") && <img src="/assets/world-connect-anime.webp" alt="" />}
-      </div>
-      <div className="world-plate world-plate-about" aria-hidden="true">
-        {loadedVisuals.has("/about") && <img src="/assets/world-about-anime.webp" alt="" />}
-      </div>
-      <SceneBoundary>
-        <Suspense fallback={null}>
-          <WorldScene path={path} stage={stage} />
-        </Suspense>
-      </SceneBoundary>
-      <LivingWorldOverlay path={path} />
-      <div className="dawn-bloom" aria-hidden="true" />
-      <div className="world-vignette" aria-hidden="true" />
-      <div className="world-grain" aria-hidden="true" />
-      <div className="pointer-aura" aria-hidden="true" />
+  const nextLocale = otherLocale(locale);
 
+  return (
+    <div className={`world-app locale-${locale}`} onPointerMove={handlePointerMove}>
+      {/* Persistent 3D World Backdrop */}
+      <div className="cosmos-backdrop" aria-hidden="true">
+        {webglSupported ? (
+          <SceneBoundary fallback={<AstralStaticBackdrop activeRealm={activeRealm} />}>
+            <Suspense fallback={<AstralStaticBackdrop activeRealm={activeRealm} />}>
+              <WorldScene
+                scrollProgressRef={scrollProgressRef}
+                pointerRef={pointerRef}
+                pulseTimeRef={pulseTimeRef}
+                isMobile={isMobile}
+                reducedMotion={reducedMotion}
+              />
+            </Suspense>
+          </SceneBoundary>
+        ) : (
+          <AstralStaticBackdrop activeRealm={activeRealm} />
+        )}
+        <div className="astral-stars" />
+        <div className="astral-vignette" />
+      </div>
+
+      {/* Fixed Header */}
       <header className="world-header">
-        <Brand onHome={() => navigate("/")} />
-        <Navigation path={path} onNavigate={navigate} />
+        <a
+          className="brand"
+          href={buildPath(locale, "home")}
+          aria-label={copy.brand.homeAria}
+          onClick={(e) => navigateRealm("home", e)}
+        >
+          <span className="brand-word">
+            <i className="brand-slash" aria-hidden="true" />
+            {copy.brand.name}
+          </span>
+          <span className="brand-coordinate">
+            {copy.brand.worldLabel} / {activeIndexStr}
+          </span>
+        </a>
+
+        <nav className="world-navigation" aria-label={copy.nav.ariaLabel}>
+          {copy.nav.items.map((item) => {
+            const isActive = activeRealm === item.id;
+            return (
+              <a
+                key={item.id}
+                href={buildPath(locale, item.id)}
+                className={isActive ? "is-active" : undefined}
+                aria-current={isActive ? "page" : undefined}
+                onClick={(e) => navigateRealm(item.id, e)}
+              >
+                <small>{item.index}</small>
+                <span>{item.label}</span>
+              </a>
+            );
+          })}
+        </nav>
+
+        <div className="header-actions">
+          <a
+            className="locale-switch"
+            href={buildPath(nextLocale, activeRealm)}
+            aria-label={copy.nav.switchAria}
+            onClick={handleToggleLocale}
+          >
+            {copy.nav.switchToLabel}
+          </a>
+          <button
+            type="button"
+            className={`sound-toggle${soundEnabled ? " is-on" : ""}`}
+            aria-label={soundEnabled ? copy.controls.soundOnAria : copy.controls.soundOffAria}
+            aria-pressed={soundEnabled}
+            onClick={() => setSoundEnabled((prev) => !prev)}
+          >
+            {soundEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}
+            <span>{soundEnabled ? copy.controls.soundOn : copy.controls.soundOff}</span>
+          </button>
+        </div>
       </header>
 
-      <BirthOverlay stage={stage} beat={birthBeat} onStart={startBirth} />
+      {/* Desktop Right-Edge Astral Compass */}
+      <aside className="astral-compass" aria-hidden="true">
+        <div className="compass-track">
+          <div
+            className="compass-fill"
+            style={{ transform: `scaleY(${Math.max(0.05, scrollUiProgress)})` }}
+          />
+        </div>
+        <div className="compass-ticks">
+          {copy.nav.items.map((item) => (
+            <a
+              key={item.id}
+              href={buildPath(locale, item.id)}
+              className={activeRealm === item.id ? "is-active" : undefined}
+              onClick={(e) => navigateRealm(item.id, e)}
+              tabIndex={-1}
+            >
+              <span>{item.index}</span>
+            </a>
+          ))}
+        </div>
+      </aside>
 
-      {stage === "revealed" && path === "/" && (
-        <HomeOverlay onNavigate={navigate} onPreview={setPreviewPath} />
-      )}
-      {stage === "revealed" && path !== "/" && path !== "/about" && (
-        <DistrictExperience path={path} onClose={() => navigate("/")} />
-      )}
-      {stage === "revealed" && path === "/about" && <AboutOverlay onClose={() => navigate("/")} />}
+      {/* Main Continuous Five-Act Spatial Track */}
+      <main className="world-track">
+        {/* ACT 00: THRESHOLD / HOME */}
+        <section id="section-home" className="realm-section realm-home" aria-labelledby="hero-title">
+          <div className="hero-column">
+            <span className="eyebrow">{copy.hero.eyebrow}</span>
+            {!webglSupported && (
+              <span className="fallback-pill">{copy.controls.webglFallbackBadge}</span>
+            )}
+            <h1 id="hero-title">
+              <span>{copy.hero.titleLine1}</span>
+              <em>{copy.hero.titleLine2}</em>
+            </h1>
+            <p className="hero-lead">{copy.hero.lead}</p>
 
-      {stage === "revealed" && (
-        <UtilityBar
-          muted={muted}
-          onToggleSound={() => setMuted((current) => !current)}
-          onReplay={replay}
-        />
-      )}
+            <div className="hero-actions">
+              <button
+                type="button"
+                className={`btn-primary${pulsed ? " is-pulsed" : ""}`}
+                onClick={triggerPulse}
+              >
+                <Sparkles size={16} aria-hidden="true" />
+                <span>{pulsed ? copy.controls.pulseDone : copy.controls.pulseGenesis}</span>
+              </button>
+              <a
+                className="btn-secondary"
+                href={buildPath(locale, "imagine")}
+                onClick={(e) => navigateRealm("imagine", e)}
+              >
+                <span>{copy.controls.exploreWorld}</span>
+                <ArrowDown size={15} aria-hidden="true" />
+              </a>
+            </div>
+          </div>
+
+          <div className="hero-pillars" aria-label={copy.controls.scrollCue}>
+            {copy.hero.pillars.map((pillar) => (
+              <a
+                key={pillar.realm}
+                href={buildPath(locale, pillar.realm)}
+                className="pillar-card"
+                onClick={(e) => navigateRealm(pillar.realm, e)}
+              >
+                <div className="pillar-top">
+                  <span className="pillar-index">{pillar.index}</span>
+                  <ArrowUpRight size={15} aria-hidden="true" />
+                </div>
+                <strong>{pillar.title}</strong>
+                <small>{pillar.subtitle}</small>
+              </a>
+            ))}
+          </div>
+        </section>
+
+        {/* ACT 01: IMAGINE */}
+        <section
+          id="section-imagine"
+          className="realm-section realm-editorial align-left"
+          aria-labelledby="imagine-title"
+        >
+          <div className="editorial-column">
+            <header className="realm-header">
+              <div className="realm-badge-row">
+                <AstrolabeBadge index={copy.realms.imagine.index} />
+                <span className="eyebrow">
+                  {copy.realms.imagine.index} / {copy.realms.imagine.cue}
+                </span>
+              </div>
+              <h2 id="imagine-title">{copy.realms.imagine.title}</h2>
+              <p className="realm-lead">{copy.realms.imagine.lead}</p>
+              <p className="realm-copy">{copy.realms.imagine.copy}</p>
+            </header>
+
+            <ImagineConstellationDiagram nodes={copy.diagrams.imagineNodes} />
+
+            <div className="chapter-stack">
+              {copy.realms.imagine.chapters.map((chapter) => (
+                <article key={chapter.eyebrow} className="chapter-card accent-cyan">
+                  <span className="eyebrow">{chapter.eyebrow}</span>
+                  <h3>{chapter.title}</h3>
+                  <p className="chapter-summary">{chapter.summary}</p>
+                  <div className="chapter-body">
+                    {chapter.body.map((paragraph) => (
+                      <p key={paragraph}>{paragraph}</p>
+                    ))}
+                  </div>
+                  <blockquote>{chapter.aside}</blockquote>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ACT 02: ALIVE */}
+        <section
+          id="section-alive"
+          className="realm-section realm-editorial align-right"
+          aria-labelledby="alive-title"
+        >
+          <div className="editorial-column">
+            <header className="realm-header">
+              <div className="realm-badge-row">
+                <AstrolabeBadge index={copy.realms.alive.index} />
+                <span className="eyebrow">
+                  {copy.realms.alive.index} / {copy.realms.alive.cue}
+                </span>
+              </div>
+              <h2 id="alive-title">{copy.realms.alive.title}</h2>
+              <p className="realm-lead">{copy.realms.alive.lead}</p>
+              <p className="realm-copy">{copy.realms.alive.copy}</p>
+            </header>
+
+            <AliveMemoryTriadDiagram rings={copy.diagrams.aliveRings} />
+
+            <div className="chapter-stack">
+              {copy.realms.alive.chapters.map((chapter) => (
+                <article key={chapter.eyebrow} className="chapter-card accent-amber">
+                  <span className="eyebrow">{chapter.eyebrow}</span>
+                  <h3>{chapter.title}</h3>
+                  <p className="chapter-summary">{chapter.summary}</p>
+                  <div className="chapter-body">
+                    {chapter.body.map((paragraph) => (
+                      <p key={paragraph}>{paragraph}</p>
+                    ))}
+                  </div>
+                  <blockquote>{chapter.aside}</blockquote>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ACT 03: CONNECT */}
+        <section
+          id="section-connect"
+          className="realm-section realm-editorial align-left"
+          aria-labelledby="connect-title"
+        >
+          <div className="editorial-column">
+            <header className="realm-header">
+              <div className="realm-badge-row">
+                <AstrolabeBadge index={copy.realms.connect.index} />
+                <span className="eyebrow">
+                  {copy.realms.connect.index} / {copy.realms.connect.cue}
+                </span>
+              </div>
+              <h2 id="connect-title">{copy.realms.connect.title}</h2>
+              <p className="realm-lead">{copy.realms.connect.lead}</p>
+              <p className="realm-copy">{copy.realms.connect.copy}</p>
+            </header>
+
+            <div className="chapter-stack">
+              {copy.realms.connect.chapters.map((chapter) => (
+                <article key={chapter.eyebrow} className="chapter-card accent-violet">
+                  <span className="eyebrow">{chapter.eyebrow}</span>
+                  <h3>{chapter.title}</h3>
+                  <p className="chapter-summary">{chapter.summary}</p>
+                  <div className="chapter-body">
+                    {chapter.body.map((paragraph) => (
+                      <p key={paragraph}>{paragraph}</p>
+                    ))}
+                  </div>
+                  <blockquote>{chapter.aside}</blockquote>
+                </article>
+              ))}
+            </div>
+
+            <ConnectRoadmap
+              eyebrow={copy.diagrams.roadmapEyebrow}
+              title={copy.diagrams.roadmapTitle}
+              lead={copy.diagrams.roadmapLead}
+              stages={copy.diagrams.verificationStages}
+            />
+          </div>
+        </section>
+
+        {/* ACT 04: ABOUT / ORIGIN */}
+        <section id="section-about" className="realm-section realm-about" aria-labelledby="about-title">
+          <div className="about-panel">
+            <div className="about-main">
+              <span className="eyebrow">{copy.about.eyebrow}</span>
+              <h2 id="about-title">{copy.about.title}</h2>
+              <span className="status-pill">{copy.about.statusBadge}</span>
+              <div className="about-paragraphs">
+                {copy.about.paragraphs.map((p) => (
+                  <p key={p}>{p}</p>
+                ))}
+              </div>
+            </div>
+
+            <div className="about-links">
+              <a
+                className="about-link-card"
+                href={copy.about.links.blog.url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <div className="about-link-top">
+                  <span>{copy.about.links.blog.label}</span>
+                  <ArrowUpRight size={17} aria-hidden="true" />
+                </div>
+                <strong>{copy.about.links.blog.value}</strong>
+                <p>{copy.about.links.blog.description}</p>
+              </a>
+
+              <div className="about-link-card">
+                <a className="about-email-anchor" href={`mailto:${copy.about.links.email.value}`}>
+                  <div className="about-link-top">
+                    <span>{copy.about.links.email.label}</span>
+                    <Mail size={16} aria-hidden="true" />
+                  </div>
+                  <strong>{copy.about.links.email.value}</strong>
+                  <p>{copy.about.links.email.description}</p>
+                </a>
+                <button type="button" className="copy-email-btn" onClick={handleCopyEmail}>
+                  {copiedEmail ? <Check size={13} /> : <Copy size={13} />}
+                  <span>{copiedEmail ? copy.controls.copiedEmail : copy.controls.copyEmail}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <footer className="world-footer">
+            <span>{copy.about.colophon}</span>
+            <span>yaqxuan.com</span>
+          </footer>
+        </section>
+      </main>
+
+      {/* Mobile Floating Dock */}
+      <nav className="mobile-dock" aria-label={copy.nav.ariaLabel}>
+        {copy.nav.items.map((item) => {
+          const isActive = activeRealm === item.id;
+          return (
+            <a
+              key={item.id}
+              href={buildPath(locale, item.id)}
+              className={isActive ? "is-active" : undefined}
+              aria-current={isActive ? "page" : undefined}
+              onClick={(e) => navigateRealm(item.id, e)}
+            >
+              <small>{item.index}</small>
+              <span>{item.label}</span>
+            </a>
+          );
+        })}
+      </nav>
     </div>
   );
 }

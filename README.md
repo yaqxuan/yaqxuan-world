@@ -1,73 +1,45 @@
-# YAQXUAN
+# YAQXUAN (`yaqxuan.com`)
 
 `yaqxuan.com` 的正式网站项目，以“让想象成为可以进入的世界”为核心，呈现个人生成式宇宙的长期愿景。
 
-当前 Cloudflare Pages 生产预览：<https://yaqxuan-world.pages.dev/>
+- **生产域名**：<https://yaqxuan.com>（Cloudflare Pages `yaqxuan-world` 项目 `main` 分支）
+- **本地开发端口**：`5175`（预览端口：`4175`）
 
-网站不是传统的纵向宣传页。同一座城市持续存在，路由对应城市中的不同区域：
+## 核心架构
 
-- `/`：世界诞生与城市入口
-- `/imagine`：故事、个人宇宙与体验式知识
-- `/alive`：角色身份、记忆、关系与世界主权
-- `/connect`：AI、VR、BCI、感官反馈与验证顺序
-- `/about`：项目性质、博客与联系方式
+网站采用 **一镜到底连续空间漫游 + 独立路由直达双模**：
 
-## 本地运行
+- `/` & `/en`：入口（Threshold · 天文星盘 3D 雕塑）
+- `/imagine` & `/en/imagine`：想象（Story Archipelago · 叙事浮岛群）
+- `/alive` & `/en/alive`：生命（Living Memory Core · 记忆回声核）
+- `/connect` & `/en/connect`：连接（Synapse Bridge · 双向脉冲桥与五阶段验证路线）
+- `/about` & `/en/about`：关于（Origin Horizon Spire · 个人长期探索、`yaqxuan.xyz` 与 `hello@yaqxuan.com`）
 
-项目约定的开发端口为 `5175`，预览端口为 `4175`。端口由本机 Codex 端口登记表统一管理。
+桌面与移动端均完整呈现实时 WebGL 2 着色器海面、五座持久 3D 空间雕塑、全部 9 个章节正文、可交互验证路线图与环境声景（默认关闭）；仅当设备不支持 WebGL 2 时降级为同等完整内容的星图矢量背景。
+
+## 本地命令
 
 ```bash
 npm install
+
+# 启动本地开发
 npm run dev
-```
 
-生产构建与预览：
+# 扫描全量源码字符并重建中英双语 WOFF2 字体子集
+npm run fonts:subset
 
-```bash
+# 构建 + 生成 10 条中英文路由静态预渲染 HTML 与 sitemap.xml
 npm run build
-npm run preview
-```
 
-首次运行浏览器验收前安装测试用 Chromium：
+# 捕获 1200x630 双语社交 OG 分享图
+npm run og:generate
 
-```bash
-npx playwright-core install chromium
+# 运行 Playwright 全端视觉与功能自动化验收
 npm run qa:local
 ```
 
-验收生产预览时可指定地址：
+## 部署与 `www` 重定向
 
-```bash
-YAQXUAN_BASE_URL=http://localhost:4175 npm run qa:local
-```
-
-验收会实际检查世界诞生、会话记忆、重新观看、区域路由、章节阅读层、键盘焦点、声音开关、窄屏静态页、减少动态效果和 WebGL 失败降级，并在 `tmp/qa/screens` 生成视觉截图。
-
-## 体验原则
-
-- 桌面端提供实时三维世界诞生、区域切换、动态环境与可展开阅读层。
-- 窄屏、减少动态效果偏好或 WebGL 2 不可用时，自动切换为可读的静态体验。
-- 环境声默认关闭，只有访客主动开启后才会播放。
-- 当前内容明确标注为愿景与学习阶段，不虚构团队、研究成果或成熟产品。
-- 所有公开人物、城市与世界设定均为原创。
-- 中文标题与正文使用本地子集化的 Noto CJK 开源字体，许可见 `public/fonts/OFL.txt`。
-
-## 部署
-
-项目可直接部署到 Cloudflare Pages：
-
-- Node.js：22
-- 构建命令：`npm run build`
-- 输出目录：`dist`
-- 生产分支：`main`
-
-`public/_redirects` 提供 SPA 直达路由回退；`public/_headers`、`robots.txt` 与 `sitemap.xml` 会随构建复制到 `dist`。
-
-### `www` 永久重定向
-
-`workers/www-redirect` 是独立的 Cloudflare Worker Custom Domain。它将
-`www.yaqxuan.com` 以 HTTP 301 永久重定向到 `https://yaqxuan.com`，并保留原始路径和查询参数。
-
-```bash
-npx wrangler deploy --config workers/www-redirect/wrangler.jsonc
-```
+- `main` 分支绑定 Cloudflare Pages 自动生产部署（Node 22，`npm run build`，输出 `dist`）。
+- 新功能与视觉改版先在独立分支预览（如 `feat/v2-overhaul` -> `feat-v2-overhaul.yaqxuan-world.pages.dev`），确认后合并上线。
+- `workers/www-redirect` 负责将 `www.yaqxuan.com` 301 永久重定向至 `https://yaqxuan.com`。
