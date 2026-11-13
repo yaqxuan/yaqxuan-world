@@ -1,8 +1,23 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+
+function resolveBrowserExecutable() {
+  if (process.env.PLAYWRIGHT_BROWSER_PATH && existsSync(process.env.PLAYWRIGHT_BROWSER_PATH)) {
+    return process.env.PLAYWRIGHT_BROWSER_PATH;
+  }
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, "Library/Caches/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    path.join(home, "Library/Caches/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  ];
+  return candidates.find((p) => existsSync(p));
+}
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OG_DIR = path.join(ROOT, "public", "og");
@@ -36,11 +51,12 @@ async function main() {
 
   try {
     await waitForServer(BASE_URL);
-    const executablePath = process.env.PLAYWRIGHT_BROWSER_PATH;
+    const executablePath = resolveBrowserExecutable();
+    const angleBackend = process.platform === "darwin" ? "metal" : "swiftshader";
     const browser = await chromium.launch({
       ...(executablePath ? { executablePath } : {}),
       headless: true,
-      args: ["--use-gl=angle", "--use-angle=swiftshader"],
+      args: ["--use-gl=angle", `--use-angle=${angleBackend}`],
     });
 
     try {

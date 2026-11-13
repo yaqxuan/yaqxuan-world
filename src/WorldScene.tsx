@@ -8,25 +8,27 @@ import {
   BufferGeometry,
   CatmullRomCurve3,
   Color,
+  CylinderGeometry,
   DirectionalLight,
   DoubleSide,
+  Euler,
   FogExp2,
   Group,
+  HemisphereLight,
   InstancedMesh,
   MathUtils,
+  Matrix4,
   Mesh,
-  Object3D,
+  MeshStandardMaterial,
+  PMREMGenerator,
+  Quaternion,
   ShaderMaterial,
   SRGBColorSpace,
-  TubeGeometry,
   Vector2,
   Vector3,
 } from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import {
-  coreFragmentShader,
-  coreVertexShader,
-  haloFragmentShader,
-  haloVertexShader,
   nebulaFragmentShader,
   nebulaVertexShader,
   particleFragmentShader,
@@ -34,11 +36,39 @@ import {
   terrainFragmentShader,
   terrainVertexShader,
 } from "./shaders";
+import {
+  createCanopyClusterBaseGeometry,
+  createFishGeometry,
+  createGrassBladeGeometry,
+  createSpiritBirdGeometry,
+  createWaterDiscGeometry,
+} from "./worlds/geometryPrimitives";
+import { createRng } from "./worlds/noise";
+import { buildSanctuaryWorld } from "./worlds/sanctuaryBuilders";
+import {
+  jellyfishFragmentShader,
+  jellyfishVertexShader,
+  sanctuaryBeamFragmentShader,
+  sanctuaryBeamVertexShader,
+  sanctuaryCloudFragmentShader,
+  sanctuaryCloudVertexShader,
+  sanctuaryWaterfallFragmentShader,
+  sanctuaryWaterfallVertexShader,
+  sanctuaryWaterFragmentShader,
+  sanctuaryWaterVertexShader,
+} from "./worlds/sanctuaryShaders";
+import {
+  createEmptyAtmosphere,
+  sampleWorldAtmosphere,
+  WORLD_SPECS,
+  type WorldId,
+} from "./worlds/worldRegistry";
 
 export type WorldSceneProps = {
   scrollProgressRef: MutableRefObject<number>;
   pointerRef: MutableRefObject<{ x: number; y: number }>;
   pulseTimeRef: MutableRefObject<number>;
+  heroWorldId?: WorldId;
   isMobile: boolean;
   reducedMotion: boolean;
 };
@@ -58,6 +88,24 @@ function interpolateStops(colors: Color[], scroll: number, out: Color) {
   const idx = Math.min(Math.floor(scaled), maxIdx - 1);
   const localT = scaled - idx;
   out.copy(colors[idx]).lerp(colors[idx + 1], localT);
+}
+
+function ProceduralEnvironmentSetup() {
+  const { gl, scene } = useThree();
+  useEffect(() => {
+    const pmrem = new PMREMGenerator(gl);
+    const room = new RoomEnvironment();
+    const rt = pmrem.fromScene(room, 0.04);
+    scene.environment = rt.texture;
+    scene.environmentIntensity = 0.38;
+    room.dispose();
+    pmrem.dispose();
+    return () => {
+      scene.environment = null;
+      rt.dispose();
+    };
+  }, [gl, scene]);
+  return null;
 }
 
 function AdaptiveQuality({ isMobile }: { isMobile: boolean }) {
@@ -92,62 +140,70 @@ function AdaptiveQuality({ isMobile }: { isMobile: boolean }) {
   return null;
 }
 
-function AtmosphereDirector({ scrollProgressRef }: { scrollProgressRef: MutableRefObject<number> }) {
+function AtmosphereDirector({
+  scrollProgressRef,
+  heroWorldId,
+}: {
+  scrollProgressRef: MutableRefObject<number>;
+  heroWorldId: WorldId;
+}) {
   const { scene } = useThree();
   const lightARef = useRef<DirectionalLight>(null);
   const lightBRef = useRef<DirectionalLight>(null);
+  const hemiRef = useRef<HemisphereLight>(null);
 
-  const palettes = useMemo(
-    () => ({
+  const palettes = useMemo(() => {
+    const heroSpec = WORLD_SPECS[heroWorldId];
+    const heroAtmo = sampleWorldAtmosphere(heroWorldId, heroSpec.defaultPhase);
+    return {
       fog: [
-        new Color("#050e1d"),
-        new Color("#061328"),
-        new Color("#140b1d"),
-        new Color("#0c0820"),
-        new Color("#0f0c20"),
+        heroAtmo.fogColor.clone().multiplyScalar(0.55),
+        new Color("#07152e"),
+        new Color("#06263a"),
+        new Color("#101233"),
+        new Color("#241829"),
       ],
       lightA: [
-        new Color("#4ff0df"),
-        new Color("#38bdf8"),
-        new Color("#ffb457"),
-        new Color("#b392ff"),
-        new Color("#ffc46b"),
+        heroAtmo.sunColor.clone(),
+        new Color("#7dd3fc"),
+        new Color("#5eead4"),
+        new Color("#c084fc"),
+        new Color("#fde68a"),
       ],
       lightB: [
-        new Color("#ffbe6b"),
-        new Color("#4ff0df"),
-        new Color("#ff758f"),
+        new Color(heroSpec.accentPrimary),
+        new Color("#fbbf24"),
         new Color("#f472b6"),
-        new Color("#60a5fa"),
+        new Color("#34d399"),
+        new Color("#fb923c"),
       ],
       tmpFog: new Color(),
       tmpA: new Color(),
       tmpB: new Color(),
-    }),
-    [],
-  );
+    };
+  }, [heroWorldId]);
 
   useFrame(() => {
     const s = scrollProgressRef.current;
     if (scene.fog && scene.fog instanceof FogExp2) {
       interpolateStops(palettes.fog, s, palettes.tmpFog);
-      scene.fog.color.lerp(palettes.tmpFog, 0.12);
+      scene.fog.color.lerp(palettes.tmpFog, 0.1);
     }
     if (lightARef.current) {
       interpolateStops(palettes.lightA, s, palettes.tmpA);
-      lightARef.current.color.lerp(palettes.tmpA, 0.12);
+      lightARef.current.color.lerp(palettes.tmpA, 0.1);
     }
     if (lightBRef.current) {
       interpolateStops(palettes.lightB, s, palettes.tmpB);
-      lightBRef.current.color.lerp(palettes.tmpB, 0.12);
+      lightBRef.current.color.lerp(palettes.tmpB, 0.1);
     }
   });
 
   return (
     <>
-      <ambientLight color="#a9c6d8" intensity={0.62} />
-      <directionalLight ref={lightARef} color="#4ff0df" intensity={1.65} position={[12, 18, 8]} />
-      <directionalLight ref={lightBRef} color="#ffbe6b" intensity={1.15} position={[-14, 10, -40]} />
+      <hemisphereLight ref={hemiRef} args={["#b8dcff", "#241b38", 0.92]} />
+      <directionalLight ref={lightARef} color="#ffd166" intensity={2.25} position={[16, 22, 12]} />
+      <directionalLight ref={lightBRef} color="#4ff0df" intensity={1.15} position={[-16, 8, -36]} />
     </>
   );
 }
@@ -193,7 +249,7 @@ function NebulaSkyDome({
 
   return (
     <mesh ref={domeRef} renderOrder={-10} material={material}>
-      <sphereGeometry args={[230, 48, 32]} />
+      <sphereGeometry args={[240, 48, 32]} />
     </mesh>
   );
 }
@@ -210,25 +266,25 @@ function CameraSplineRig({
   reducedMotion: boolean;
 }) {
   const smoothScroll = useRef(scrollProgressRef.current);
-  const currentLook = useRef(new Vector3(isMobile ? 0 : 1.6, 2.2, -16));
+  const currentLook = useRef(new Vector3(isMobile ? 0 : 2.8, 2.2, -16));
   const desiredPos = useMemo(() => new Vector3(), []);
   const desiredLook = useMemo(() => new Vector3(), []);
 
   const { posCurve, lookCurve } = useMemo(() => {
     const xOffset = isMobile ? 0 : 1;
     const posCurve = new CatmullRomCurve3([
-      new Vector3(-1.4 * xOffset, isMobile ? 3.8 : 3.2, 6),
-      new Vector3(-1.8 * xOffset, isMobile ? 4.4 : 3.6, -34),
-      new Vector3(2.2 * xOffset, isMobile ? 4.5 : 3.8, -74),
-      new Vector3(-1.8 * xOffset, isMobile ? 4.8 : 4.1, -114),
-      new Vector3(0, isMobile ? 4.6 : 4.0, -154),
+      new Vector3(-1.6 * xOffset, isMobile ? 4.4 : 4.1, 7.2),
+      new Vector3(-1.9 * xOffset, isMobile ? 4.7 : 4.3, -33.0),
+      new Vector3(2.2 * xOffset, isMobile ? 4.7 : 4.3, -73.0),
+      new Vector3(-1.9 * xOffset, isMobile ? 4.8 : 4.4, -113.0),
+      new Vector3(0, isMobile ? 4.9 : 4.5, -153.0),
     ]);
     const lookCurve = new CatmullRomCurve3([
-      new Vector3(2.8 * xOffset, isMobile ? 3.0 : 2.2, -16),
-      new Vector3(3.8 * xOffset, isMobile ? 3.1 : 2.3, -56),
-      new Vector3(-3.8 * xOffset, isMobile ? 3.1 : 2.4, -96),
-      new Vector3(3.8 * xOffset, isMobile ? 3.2 : 2.6, -136),
-      new Vector3(isMobile ? 0 : 1.1, isMobile ? 3.8 : 3.4, -176),
+      new Vector3(2.9 * xOffset, isMobile ? 2.4 : 2.1, -17.0),
+      new Vector3(3.6 * xOffset, isMobile ? 2.6 : 2.3, -57.0),
+      new Vector3(-3.6 * xOffset, isMobile ? 2.6 : 2.3, -97.0),
+      new Vector3(3.6 * xOffset, isMobile ? 2.7 : 2.4, -137.0),
+      new Vector3(isMobile ? 0 : 1.5, isMobile ? 3.2 : 2.9, -177.0),
     ]);
     return { posCurve, lookCurve };
   }, [isMobile]);
@@ -249,8 +305,8 @@ function CameraSplineRig({
     const pointerScale = reducedMotion ? 0 : isMobile ? 0.3 : 0.85;
     desiredPos.x += pointerRef.current.x * pointerScale;
     desiredPos.y += pointerRef.current.y * pointerScale * 0.45;
-    desiredLook.x += pointerRef.current.x * pointerScale * 1.4;
-    desiredLook.y += pointerRef.current.y * pointerScale * 0.6;
+    desiredLook.x += pointerRef.current.x * pointerScale * 1.35;
+    desiredLook.y += pointerRef.current.y * pointerScale * 0.55;
 
     const lerpFactor = reducedMotion ? 1 : 1 - Math.exp(-delta * 6.5);
     state.camera.position.lerp(desiredPos, lerpFactor);
@@ -286,24 +342,84 @@ function TopographicSea({
     [],
   );
 
-  useEffect(() => () => material.dispose(), [material]);
+  const cloudMaterial = useMemo(
+    () =>
+      new ShaderMaterial({
+        vertexShader: sanctuaryCloudVertexShader,
+        fragmentShader: sanctuaryCloudFragmentShader,
+        transparent: true,
+        depthWrite: false,
+        uniforms: {
+          uTime: { value: 0 },
+          uCloudLitColor: { value: new Color("#38bdf8") },
+          uCloudShadowColor: { value: new Color("#08142c") },
+          uHorizonColor: { value: new Color("#09152b") },
+          uSunDirection: { value: new Vector3(0.3, 0.35, -0.85) },
+        },
+      }),
+    [],
+  );
 
-  useFrame(({ clock }) => {
+  useEffect(
+    () => () => {
+      material.dispose();
+      cloudMaterial.dispose();
+    },
+    [material, cloudMaterial],
+  );
+
+  const cloudPalettes = useMemo(
+    () => ({
+      lit: [
+        new Color("#ff9e64"),
+        new Color("#38bdf8"),
+        new Color("#2dd4bf"),
+        new Color("#c084fc"),
+        new Color("#fbbf24"),
+      ],
+      shadow: [
+        new Color("#1a1432"),
+        new Color("#091631"),
+        new Color("#052236"),
+        new Color("#121233"),
+        new Color("#28192b"),
+      ],
+      tmpLit: new Color(),
+      tmpShadow: new Color(),
+    }),
+    [],
+  );
+
+  useFrame(({ clock, camera }) => {
     const t = reducedMotion ? 0 : clock.getElapsedTime();
+    const s = scrollProgressRef.current;
     material.uniforms.uTime.value = t;
-    material.uniforms.uScroll.value = scrollProgressRef.current;
+    material.uniforms.uScroll.value = s;
     material.uniforms.uPointer.value.set(pointerRef.current.x, pointerRef.current.y);
     material.uniforms.uPulseAge.value =
       pulseTimeRef.current > 0 ? Math.max(0, (performance.now() - pulseTimeRef.current) * 0.001) : 0;
+
+    interpolateStops(cloudPalettes.lit, s, cloudPalettes.tmpLit);
+    interpolateStops(cloudPalettes.shadow, s, cloudPalettes.tmpShadow);
+    cloudMaterial.uniforms.uTime.value = t * 0.7;
+    cloudMaterial.uniforms.uCloudLitColor.value.lerp(cloudPalettes.tmpLit, 0.08);
+    cloudMaterial.uniforms.uCloudShadowColor.value.lerp(cloudPalettes.tmpShadow, 0.08);
+    cloudMaterial.uniforms.uHorizonColor.value.copy(cloudPalettes.tmpShadow);
+    void camera;
   });
 
-  const segX = isMobile ? 84 : 136;
-  const segZ = isMobile ? 120 : 210;
+  const segX = isMobile ? 72 : 116;
+  const segZ = isMobile ? 104 : 180;
 
   return (
-    <mesh position={[0, -3.8, -96]} rotation={[-Math.PI / 2, 0, 0]} material={material}>
-      <planeGeometry args={[150, 260, segX, segZ]} />
-    </mesh>
+    <>
+      <mesh position={[0, -4.4, -96]} rotation={[-Math.PI / 2, 0, 0]} material={material}>
+        <planeGeometry args={[155, 265, segX, segZ]} />
+      </mesh>
+      <mesh position={[0, -7.8, -96]} rotation={[-Math.PI / 2, 0, 0]} material={cloudMaterial}>
+        <planeGeometry args={[220, 310, isMobile ? 48 : 76, isMobile ? 64 : 96]} />
+      </mesh>
+    </>
   );
 }
 
@@ -316,7 +432,7 @@ function AstralParticles({
   isMobile: boolean;
   reducedMotion: boolean;
 }) {
-  const count = isMobile ? 1100 : 2500;
+  const count = isMobile ? 950 : 2100;
 
   const { geometry, material } = useMemo(() => {
     const random = seededRandom(42026);
@@ -341,7 +457,7 @@ function AstralParticles({
       positions[i * 3 + 1] = -2.5 + random() * 26;
       positions[i * 3 + 2] = z;
 
-      scales[i] = 0.72 + Math.pow(random(), 2.0) * 3.35;
+      scales[i] = 0.72 + Math.pow(random(), 2.0) * 3.2;
       phases[i] = random() * Math.PI * 2;
 
       const c = palette[Math.floor(random() * palette.length)];
@@ -364,7 +480,6 @@ function AstralParticles({
       blending: AdditiveBlending,
       uniforms: {
         uTime: { value: 0 },
-        uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2) },
         uPulseAge: { value: 0 },
       },
     });
@@ -372,16 +487,16 @@ function AstralParticles({
     return { geometry: geom, material: mat };
   }, [count]);
 
-  useEffect(() => {
-    return () => {
+  useEffect(
+    () => () => {
       geometry.dispose();
       material.dispose();
-    };
-  }, [geometry, material]);
+    },
+    [geometry, material],
+  );
 
-  useFrame(({ clock, gl }) => {
+  useFrame(({ clock }) => {
     material.uniforms.uTime.value = reducedMotion ? 0 : clock.getElapsedTime();
-    material.uniforms.uPixelRatio.value = gl.getPixelRatio();
     material.uniforms.uPulseAge.value =
       pulseTimeRef.current > 0 ? Math.max(0, (performance.now() - pulseTimeRef.current) * 0.001) : 0;
   });
@@ -389,619 +504,387 @@ function AstralParticles({
   return <points geometry={geometry} material={material} />;
 }
 
-/** Monument 00: Celestial Astrolabe (Home / Threshold) */
-function AstrolabeMonument({
+/**
+ * Tangible Pure-Code 3D Sanctuary Diorama Station mounted along the 5-Act Spatial Corridor
+ */
+function BackdropSanctuaryStation({
+  worldId,
+  position,
+  yaw,
+  scale,
   pulseTimeRef,
-  isMobile,
   reducedMotion,
 }: {
-  pulseTimeRef: MutableRefObject<number>;
-  isMobile: boolean;
+  worldId: WorldId;
+  position: [number, number, number];
+  yaw: number;
+  scale: number;
+  pulseTimeRef?: MutableRefObject<number>;
   reducedMotion: boolean;
 }) {
-  const group = useRef<Group>(null);
-  const ringA = useRef<Mesh>(null);
-  const ringB = useRef<Mesh>(null);
-  const ringC = useRef<Mesh>(null);
-  const ringD = useRef<Mesh>(null);
-  const ticks = useRef<InstancedMesh>(null);
-  const beadsRef = useRef<Array<Mesh | null>>([]);
+  const rootRef = useRef<Group>(null);
+  const spec = WORLD_SPECS[worldId];
 
-  const { coreMat, haloMat } = useMemo(() => {
-    const core = new ShaderMaterial({
-      vertexShader: coreVertexShader,
-      fragmentShader: coreFragmentShader,
-      transparent: true,
-      uniforms: {
-        uTime: { value: 0 },
-        uPulseAge: { value: 0 },
-        uBreath: { value: 0.6 },
-        uPrimaryColor: { value: new Color("#4ff0df") },
-        uSecondaryColor: { value: new Color("#ffbe6b") },
-        uTertiaryColor: { value: new Color("#8b5cf6") },
-        uOpacity: { value: 0.96 },
-      },
+  const stationResources = useMemo(() => {
+    const built = buildSanctuaryWorld(worldId, spec.defaultSeed, "backdrop");
+    const atmo = sampleWorldAtmosphere(worldId, spec.defaultPhase, createEmptyAtmosphere());
+
+    const terrainMat = new MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.84,
+      metalness: 0.06,
+      flatShading: true,
     });
-    const halo = new ShaderMaterial({
-      vertexShader: haloVertexShader,
-      fragmentShader: haloFragmentShader,
-      transparent: true,
-      depthWrite: false,
-      side: BackSide,
-      blending: AdditiveBlending,
-      uniforms: {
-        uPrimaryColor: { value: new Color("#4ff0df") },
-        uSecondaryColor: { value: new Color("#ffbe6b") },
-        uIntensity: { value: 0.48 },
-      },
+    const stoneMat = new MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.46,
+      metalness: 0.14,
     });
-    return { coreMat: core, haloMat: halo };
-  }, []);
+    const woodMat = new MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.7,
+      metalness: 0.08,
+    });
+    const goldMat = new MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.24,
+      metalness: 0.86,
+      emissive: new Color("#f59e0b"),
+      emissiveIntensity: 0.24,
+    });
+    const crystalMat = new MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.16,
+      metalness: 0.25,
+      emissive: new Color(spec.accentPrimary),
+      emissiveIntensity: 0.56,
+    });
+    const emissiveMat = new MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.18,
+      metalness: 0.1,
+      emissive: new Color("#ffffff"),
+      emissiveIntensity: 1.45,
+    });
 
-  useEffect(
-    () => () => {
-      coreMat.dispose();
-      haloMat.dispose();
-    },
-    [coreMat, haloMat],
-  );
+    const group = new Group();
+    const extraDisposables: Array<{ dispose: () => void }> = [
+      terrainMat,
+      stoneMat,
+      woodMat,
+      goldMat,
+      crystalMat,
+      emissiveMat,
+    ];
 
-  useEffect(() => {
-    if (!ticks.current) return;
-    const dummy = new Object3D();
-    const total = 48;
-    for (let i = 0; i < total; i += 1) {
-      const angle = (i / total) * Math.PI * 2;
-      const r = 6.2;
-      dummy.position.set(Math.cos(angle) * r, Math.sin(angle) * r, 0);
-      dummy.rotation.set(0, 0, angle);
-      const major = i % 4 === 0 ? 1.6 : 0.7;
-      dummy.scale.set(major, 1, 1);
-      dummy.updateMatrix();
-      ticks.current.setMatrixAt(i, dummy.matrix);
+    group.add(new Mesh(built.terrainGeometry, terrainMat));
+    group.add(new Mesh(built.stoneGeometry, stoneMat));
+    group.add(new Mesh(built.woodGeometry, woodMat));
+    group.add(new Mesh(built.goldGeometry, goldMat));
+    group.add(new Mesh(built.crystalGeometry, crystalMat));
+    group.add(new Mesh(built.emissiveGeometry, emissiveMat));
+
+    // Water Discs
+    const waterMats: ShaderMaterial[] = [];
+    for (const wb of built.waterBodies) {
+      const wGeo = createWaterDiscGeometry(wb.radius, 36);
+      const wMat = new ShaderMaterial({
+        vertexShader: sanctuaryWaterVertexShader,
+        fragmentShader: sanctuaryWaterFragmentShader,
+        transparent: true,
+        depthWrite: false,
+        uniforms: {
+          uTime: { value: 0 },
+          uDeepColor: { value: atmo.waterDeepColor.clone() },
+          uShallowColor: { value: atmo.waterShallowColor.clone() },
+          uSunColor: { value: atmo.sunColor.clone() },
+          uHorizonColor: { value: atmo.horizonColor.clone() },
+          uSunDirection: { value: atmo.sunDirection.clone() },
+          uShoreRadius: { value: wb.radius },
+          uCausticsStrength: { value: atmo.causticsStrength },
+        },
+      });
+      const wm = new Mesh(wGeo, wMat);
+      wm.position.set(...wb.position);
+      group.add(wm);
+      waterMats.push(wMat);
+      extraDisposables.push(wGeo, wMat);
     }
-    ticks.current.instanceMatrix.needsUpdate = true;
-  }, []);
 
-  const beads = useMemo(
-    () => [
-      { radius: 4.1, speed: 0.45, color: "#4ff0df", tilt: 0.36 },
-      { radius: 5.1, speed: -0.34, color: "#ffbe6b", tilt: -0.45 },
-      { radius: 6.9, speed: 0.28, color: "#ff758f", tilt: 0.58 },
-    ],
-    [],
-  );
-
-  useFrame(({ clock }, delta) => {
-    const t = reducedMotion ? 0 : clock.getElapsedTime();
-    coreMat.uniforms.uTime.value = t;
-    coreMat.uniforms.uPulseAge.value =
-      pulseTimeRef.current > 0 ? Math.max(0, (performance.now() - pulseTimeRef.current) * 0.001) : 0;
-
-    if (reducedMotion) return;
-    if (group.current) group.current.position.y = (isMobile ? 4.4 : 2.7) + Math.sin(t * 0.65) * 0.22;
-    if (ringA.current) ringA.current.rotation.z += delta * 0.14;
-    if (ringB.current) ringB.current.rotation.y += delta * 0.18;
-    if (ringC.current) ringC.current.rotation.x -= delta * 0.11;
-    if (ringD.current) ringD.current.rotation.z -= delta * 0.09;
-
-    beads.forEach((bead, idx) => {
-      const mesh = beadsRef.current[idx];
-      if (!mesh) return;
-      const angle = t * bead.speed + idx * 2.1;
-      mesh.position.set(
-        Math.cos(angle) * bead.radius,
-        Math.sin(angle) * bead.radius * Math.sin(bead.tilt),
-        Math.sin(angle) * bead.radius * Math.cos(bead.tilt),
-      );
-    });
-  });
-
-  const posX = isMobile ? 0 : 4.2;
-
-  return (
-    <group ref={group} position={[posX, isMobile ? 4.4 : 2.7, -16]} scale={isMobile ? 0.78 : 1}>
-      <mesh material={coreMat}>
-        <icosahedronGeometry args={[2.1, 5]} />
-      </mesh>
-      <mesh scale={1.48} material={haloMat}>
-        <sphereGeometry args={[2.1, 32, 24]} />
-      </mesh>
-      <mesh ref={ringA} rotation={[Math.PI * 0.36, 0.25, 0]}>
-        <torusGeometry args={[4.1, 0.035, 16, 120]} />
-        <meshBasicMaterial color="#4ff0df" transparent opacity={0.78} />
-      </mesh>
-      <mesh ref={ringB} rotation={[-Math.PI * 0.25, 0.55, 0.2]}>
-        <torusGeometry args={[5.1, 0.028, 16, 120]} />
-        <meshBasicMaterial color="#ffbe6b" transparent opacity={0.68} />
-      </mesh>
-      <mesh ref={ringC} rotation={[0.18, -0.3, Math.PI * 0.15]}>
-        <torusGeometry args={[6.2, 0.022, 12, 140]} />
-        <meshBasicMaterial color="#a78bfa" transparent opacity={0.52} />
-      </mesh>
-      <mesh ref={ringD} rotation={[-0.42, -0.45, Math.PI * 0.28]}>
-        <torusGeometry args={[6.9, 0.018, 12, 140]} />
-        <meshBasicMaterial color="#ff758f" transparent opacity={0.44} />
-      </mesh>
-      <instancedMesh ref={ticks} args={[undefined, undefined, 48]} rotation={[Math.PI * 0.36, 0.25, 0]}>
-        <boxGeometry args={[0.24, 0.035, 0.035]} />
-        <meshBasicMaterial color="#4ff0df" transparent opacity={0.72} />
-      </instancedMesh>
-      {beads.map((bead, idx) => (
-        <mesh
-          key={idx}
-          ref={(el) => {
-            beadsRef.current[idx] = el;
-          }}
-        >
-          <sphereGeometry args={[0.17, 14, 14]} />
-          <meshBasicMaterial color={bead.color} />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
-/** Monument 01: Story Archipelago (Imagine) */
-function StoryArchipelagoMonument({
-  isMobile,
-  reducedMotion,
-}: {
-  isMobile: boolean;
-  reducedMotion: boolean;
-}) {
-  const group = useRef<Group>(null);
-  const shardRefs = useRef<Array<Group | null>>([]);
-
-  const { nodes, tubeGeometries, bridgeColors } = useMemo(() => {
-    const coords: Array<[number, number, number, number, string]> = [
-      [0, 0.6, 0, 1.35, "#38bdf8"],
-      [-3.1, 2.2, 1.4, 0.85, "#ffbe6b"],
-      [2.8, 2.7, -1.5, 0.92, "#4ff0df"],
-      [-2.2, -1.6, -2.0, 0.72, "#c084fc"],
-      [3.3, -1.1, 1.6, 0.78, "#ff758f"],
-      [0.4, 3.6, -2.8, 0.62, "#ffd166"],
-      [-0.4, -2.6, 2.3, 0.65, "#60a5fa"],
-    ];
-
-    const links: Array<[number, number]> = [
-      [0, 1],
-      [0, 2],
-      [0, 3],
-      [0, 4],
-      [1, 5],
-      [2, 5],
-      [3, 6],
-      [4, 6],
-    ];
-
-    const colors = [
-      "#38bdf8",
-      "#ffbe6b",
-      "#4ff0df",
-      "#c084fc",
-      "#ff758f",
-      "#ffd166",
-      "#60a5fa",
-      "#4ff0df",
-    ];
-
-    const tubes = links.map(([a, b]) => {
-      const pA = new Vector3(coords[a][0], coords[a][1], coords[a][2]);
-      const pB = new Vector3(coords[b][0], coords[b][1], coords[b][2]);
-      const mid = pA.clone().lerp(pB, 0.5).add(new Vector3(0, 0.55, 0));
-      return new TubeGeometry(new CatmullRomCurve3([pA, mid, pB]), 36, 0.022, 8, false);
-    });
-
-    return { nodes: coords, tubeGeometries: tubes, bridgeColors: colors };
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      tubeGeometries.forEach((tube) => tube.dispose());
-    };
-  }, [tubeGeometries]);
-
-  useFrame(({ clock }, delta) => {
-    if (reducedMotion) return;
-    const t = clock.getElapsedTime();
-    if (group.current) group.current.rotation.y += delta * 0.075;
-    shardRefs.current.forEach((node, idx) => {
-      if (!node) return;
-      node.position.y = nodes[idx][1] + Math.sin(t * 0.9 + idx * 1.1) * 0.24;
-      node.rotation.y += delta * (0.22 + idx * 0.03);
-      node.rotation.x += delta * 0.08;
-    });
-  });
-
-  const posX = isMobile ? 0 : 6.2;
-
-  return (
-    <group ref={group} position={[posX, isMobile ? 4.2 : 2.4, -56]} scale={isMobile ? 0.75 : 1}>
-      {nodes.map(([x, y, z, size, color], idx) => (
-        <group
-          key={idx}
-          ref={(el) => {
-            shardRefs.current[idx] = el;
-          }}
-          position={[x, y, z]}
-        >
-          <mesh>
-            <octahedronGeometry args={[size, 0]} />
-            <meshStandardMaterial
-              color={color}
-              emissive={color}
-              emissiveIntensity={0.68}
-              roughness={0.2}
-              metalness={0.5}
-              transparent
-              opacity={0.52}
-            />
-          </mesh>
-          <mesh>
-            <sphereGeometry args={[size * 0.34, 12, 12]} />
-            <meshBasicMaterial color={color} transparent opacity={0.85} />
-          </mesh>
-          <mesh>
-            <octahedronGeometry args={[size * 1.07, 0]} />
-            <meshBasicMaterial color={color} wireframe transparent opacity={0.86} />
-          </mesh>
-        </group>
-      ))}
-      {tubeGeometries.map((tube, idx) => (
-        <mesh key={idx} geometry={tube}>
-          <meshBasicMaterial color={bridgeColors[idx]} transparent opacity={0.52} />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
-/** Monument 02: Living Memory Core (Alive) */
-function LivingMemoryMonument({
-  isMobile,
-  reducedMotion,
-}: {
-  isMobile: boolean;
-  reducedMotion: boolean;
-}) {
-  const orbitGroup = useRef<Group>(null);
-  const nodeRefs = useRef<Array<Mesh | null>>([]);
-
-  const { coreMat, haloMat } = useMemo(() => {
-    const core = new ShaderMaterial({
-      vertexShader: coreVertexShader,
-      fragmentShader: coreFragmentShader,
-      transparent: true,
-      uniforms: {
-        uTime: { value: 0 },
-        uPulseAge: { value: 0 },
-        uBreath: { value: 1.1 },
-        uPrimaryColor: { value: new Color("#ffb457") },
-        uSecondaryColor: { value: new Color("#ff6b8b") },
-        uTertiaryColor: { value: new Color("#a855f7") },
-        uOpacity: { value: 0.96 },
-      },
-    });
-    const halo = new ShaderMaterial({
-      vertexShader: haloVertexShader,
-      fragmentShader: haloFragmentShader,
-      transparent: true,
-      depthWrite: false,
-      side: BackSide,
-      blending: AdditiveBlending,
-      uniforms: {
-        uPrimaryColor: { value: new Color("#ffb457") },
-        uSecondaryColor: { value: new Color("#ff6b8b") },
-        uIntensity: { value: 0.52 },
-      },
-    });
-    return { coreMat: core, haloMat: halo };
-  }, []);
-
-  useEffect(
-    () => () => {
-      coreMat.dispose();
-      haloMat.dispose();
-    },
-    [coreMat, haloMat],
-  );
-
-  const satellites = useMemo(
-    () => [
-      { radius: 3.3, speed: 0.42, tilt: 0.3, color: "#ffb457" },
-      { radius: 4.3, speed: -0.31, tilt: -0.45, color: "#ff758f" },
-      { radius: 5.3, speed: 0.23, tilt: 0.62, color: "#4ff0df" },
-      { radius: 3.8, speed: -0.5, tilt: 0.85, color: "#c490ff" },
-      { radius: 4.8, speed: 0.36, tilt: -0.72, color: "#ffd166" },
-    ],
-    [],
-  );
-
-  useFrame(({ clock }) => {
-    const t = reducedMotion ? 0 : clock.getElapsedTime();
-    coreMat.uniforms.uTime.value = t;
-
-    if (reducedMotion) return;
-    if (orbitGroup.current) {
-      orbitGroup.current.position.y = (isMobile ? 4.1 : 2.5) + Math.sin(t * 0.7) * 0.18;
+    // Waterfalls
+    const waterfallMats: ShaderMaterial[] = [];
+    for (const wfGeo of built.waterfalls) {
+      const wfMat = new ShaderMaterial({
+        vertexShader: sanctuaryWaterfallVertexShader,
+        fragmentShader: sanctuaryWaterfallFragmentShader,
+        transparent: true,
+        depthWrite: false,
+        side: DoubleSide,
+        uniforms: {
+          uTime: { value: 0 },
+          uFoamColor: { value: new Color("#f0f9ff") },
+          uWaterColor: { value: new Color("#38bdf8") },
+        },
+      });
+      group.add(new Mesh(wfGeo, wfMat));
+      waterfallMats.push(wfMat);
+      extraDisposables.push(wfMat);
     }
-    satellites.forEach((sat, idx) => {
-      const mesh = nodeRefs.current[idx];
-      if (!mesh) return;
-      const angle = t * sat.speed + idx * 1.4;
-      mesh.position.set(
-        Math.cos(angle) * sat.radius,
-        Math.sin(angle) * sat.radius * Math.sin(sat.tilt),
-        Math.sin(angle) * sat.radius * Math.cos(sat.tilt),
-      );
-    });
-  });
 
-  const posX = isMobile ? 0 : -6.2;
+    // Light Beams
+    const beamMats: ShaderMaterial[] = [];
+    for (const b of built.lightBeams) {
+      const bGeo = new CylinderGeometry(b.radiusTop, b.radiusBottom, b.height, 18, 1, true);
+      const bMat = new ShaderMaterial({
+        vertexShader: sanctuaryBeamVertexShader,
+        fragmentShader: sanctuaryBeamFragmentShader,
+        transparent: true,
+        depthWrite: false,
+        blending: AdditiveBlending,
+        side: DoubleSide,
+        uniforms: {
+          uTime: { value: 0 },
+          uBeamColor: { value: new Color(b.color) },
+          uOpacity: { value: b.opacity },
+        },
+      });
+      const bm = new Mesh(bGeo, bMat);
+      bm.position.set(...b.position);
+      bm.rotation.set(...b.rotation);
+      group.add(bm);
+      beamMats.push(bMat);
+      extraDisposables.push(bGeo, bMat);
+    }
 
-  return (
-    <group ref={orbitGroup} position={[posX, isMobile ? 4.1 : 2.5, -96]} scale={isMobile ? 0.76 : 1}>
-      <mesh material={coreMat}>
-        <icosahedronGeometry args={[1.85, 5]} />
-      </mesh>
-      <mesh scale={1.52} material={haloMat}>
-        <sphereGeometry args={[1.85, 32, 24]} />
-      </mesh>
-      <mesh rotation={[Math.PI * 0.42, 0.2, 0]}>
-        <torusGeometry args={[3.3, 0.028, 16, 120]} />
-        <meshBasicMaterial color="#ffb457" transparent opacity={0.72} />
-      </mesh>
-      <mesh rotation={[-Math.PI * 0.34, 0.45, 0.3]}>
-        <torusGeometry args={[4.3, 0.024, 16, 120]} />
-        <meshBasicMaterial color="#ff758f" transparent opacity={0.62} />
-      </mesh>
-      <mesh rotation={[Math.PI * 0.22, -0.55, -0.25]}>
-        <torusGeometry args={[5.3, 0.02, 16, 120]} />
-        <meshBasicMaterial color="#c490ff" transparent opacity={0.54} />
-      </mesh>
-      {satellites.map((sat, idx) => (
-        <mesh
-          key={idx}
-          ref={(el) => {
-            nodeRefs.current[idx] = el;
-          }}
-        >
-          <sphereGeometry args={[0.21, 16, 16]} />
-          <meshBasicMaterial color={sat.color} />
-        </mesh>
-      ))}
-    </group>
-  );
-}
+    // Kinetics
+    const kineticItems: Array<{
+      mesh: Mesh;
+      basePos: Vector3;
+      rotSpeed: [number, number, number];
+      bobAmp: number;
+      bobSpeed: number;
+      phase: number;
+      jellyTime?: { value: number };
+    }> = [];
 
-/** Monument 03: Bidirectional Synapse Bridge (Connect) */
-function SynapseBridgeMonument({
-  isMobile,
-  reducedMotion,
-}: {
-  isMobile: boolean;
-  reducedMotion: boolean;
-}) {
-  const group = useRef<Group>(null);
-  const outboundParticles = useRef<InstancedMesh>(null);
-  const returnParticles = useRef<InstancedMesh>(null);
-  const dummy = useMemo(() => new Object3D(), []);
+    for (const k of built.kinetics) {
+      let mat: MeshStandardMaterial | ShaderMaterial = goldMat;
+      let jellyTime: { value: number } | undefined;
+      if (k.materialKind === "jellyfish") {
+        jellyTime = { value: 0 };
+        mat = new ShaderMaterial({
+          vertexShader: jellyfishVertexShader,
+          fragmentShader: jellyfishFragmentShader,
+          transparent: true,
+          depthWrite: false,
+          side: DoubleSide,
+          blending: AdditiveBlending,
+          uniforms: {
+            uTime: jellyTime,
+            uCoreColor: { value: new Color(k.jellyfishColors?.[0] ?? "#2dd4bf") },
+            uRimColor: { value: new Color(k.jellyfishColors?.[1] ?? "#f472b6") },
+          },
+        });
+        extraDisposables.push(mat);
+      } else if (k.materialKind === "emissive") {
+        mat = emissiveMat;
+      } else if (k.materialKind === "wood") {
+        mat = woodMat;
+      }
+      const km = new Mesh(k.geometry, mat);
+      km.position.set(...k.position);
+      if (k.initialRotation) km.rotation.set(...k.initialRotation);
+      group.add(km);
+      kineticItems.push({
+        mesh: km,
+        basePos: new Vector3(...k.position),
+        rotSpeed: k.rotationSpeed,
+        bobAmp: k.bobAmplitude ?? 0,
+        bobSpeed: k.bobSpeed ?? 1,
+        phase: k.phase ?? 0,
+        jellyTime,
+      });
+    }
 
-  const { outboundCurve, returnCurve, outboundTube, returnTube, harmonicTube } = useMemo(() => {
-    const leftAnchor = new Vector3(-4.2, -0.6, 0.8);
-    const rightAnchor = new Vector3(4.2, 1.3, -1.2);
-    const outboundCurve = new CatmullRomCurve3([
-      leftAnchor,
-      new Vector3(-1.4, 2.5, 2.0),
-      new Vector3(1.6, 2.8, -0.4),
-      rightAnchor,
-    ]);
-    const returnCurve = new CatmullRomCurve3([
-      rightAnchor,
-      new Vector3(1.4, -1.5, -2.2),
-      new Vector3(-1.5, -1.2, 0.6),
-      leftAnchor,
-    ]);
-    const harmonicCurve = new CatmullRomCurve3([
-      leftAnchor,
-      new Vector3(-0.6, 0.4, -1.8),
-      new Vector3(0.8, 0.8, 2.1),
-      rightAnchor,
-    ]);
+    // Canopy Clusters
+    if (built.canopyClusters.length > 0) {
+      const cGeo = createCanopyClusterBaseGeometry();
+      const cMat = new MeshStandardMaterial({
+        roughness: 0.56,
+        metalness: 0.04,
+        flatShading: true,
+        emissive: new Color(spec.accentPrimary),
+        emissiveIntensity: 0.18,
+      });
+      const inst = new InstancedMesh(cGeo, cMat, built.canopyClusters.length);
+      const m4 = new Matrix4();
+      const q = new Quaternion();
+      const e = new Euler();
+      const sv = new Vector3();
+      built.canopyClusters.forEach((c, idx) => {
+        e.set(idx * 0.31, idx * 0.87, idx * 0.19);
+        q.setFromEuler(e);
+        sv.set(...c.scale);
+        m4.compose(c.position, q, sv);
+        inst.setMatrixAt(idx, m4);
+        inst.setColorAt(idx, c.color);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+      group.add(inst);
+      extraDisposables.push(cGeo, cMat);
+    }
+
+    // Grass / Kelp Instances
+    if (built.grassInstances.length > 0) {
+      const gGeo = createGrassBladeGeometry();
+      const gMat = new MeshStandardMaterial({
+        roughness: 0.68,
+        metalness: 0.05,
+        side: DoubleSide,
+      });
+      const gInst = new InstancedMesh(gGeo, gMat, built.grassInstances.length);
+      built.grassInstances.forEach((g, idx) => {
+        gInst.setMatrixAt(idx, g.matrix);
+        gInst.setColorAt(idx, g.color);
+      });
+      gInst.instanceMatrix.needsUpdate = true;
+      if (gInst.instanceColor) gInst.instanceColor.needsUpdate = true;
+      group.add(gInst);
+      extraDisposables.push(gGeo, gMat);
+    }
+
+    // Flock (Birds or Spirit Fish)
+    let flockInst: InstancedMesh | null = null;
+    const flockData: Array<{
+      r: number;
+      h: number;
+      a: number;
+      speed: number;
+      phase: number;
+      scale: number;
+    }> = [];
+    if (built.flock && built.flock.count > 0) {
+      const fs = built.flock;
+      const fGeo = fs.kind === "fish" ? createFishGeometry() : createSpiritBirdGeometry();
+      const fMat = new MeshStandardMaterial({
+        roughness: 0.3,
+        metalness: 0.2,
+        side: DoubleSide,
+        emissive: new Color(fs.colorA),
+        emissiveIntensity: 0.55,
+      });
+      flockInst = new InstancedMesh(fGeo, fMat, fs.count);
+      const rngF = createRng(spec.defaultSeed + 777);
+      const colA = new Color(fs.colorA);
+      const colB = new Color(fs.colorB);
+      for (let i = 0; i < fs.count; i += 1) {
+        flockData.push({
+          r: MathUtils.lerp(fs.orbitRadius[0], fs.orbitRadius[1], rngF()),
+          h: MathUtils.lerp(fs.heightRange[0], fs.heightRange[1], rngF()),
+          a: rngF() * Math.PI * 2,
+          speed: fs.speed * (0.75 + rngF() * 0.5) * (i % 4 === 0 ? -1 : 1),
+          phase: rngF() * Math.PI * 2,
+          scale: fs.kind === "fish" ? 0.65 + rngF() * 0.5 : 0.75 + rngF() * 0.45,
+        });
+        flockInst.setColorAt(i, colA.clone().lerp(colB, rngF()));
+      }
+      if (flockInst.instanceColor) flockInst.instanceColor.needsUpdate = true;
+      group.add(flockInst);
+      extraDisposables.push(fGeo, fMat);
+    }
+
     return {
-      outboundCurve,
-      returnCurve,
-      outboundTube: new TubeGeometry(outboundCurve, 72, 0.036, 10, false),
-      returnTube: new TubeGeometry(returnCurve, 72, 0.036, 10, false),
-      harmonicTube: new TubeGeometry(harmonicCurve, 72, 0.024, 10, false),
+      group,
+      built,
+      waterMats,
+      waterfallMats,
+      beamMats,
+      kineticItems,
+      flockInst,
+      flockData,
+      emissiveMat,
+      crystalMat,
+      disposeAll: () => {
+        built.dispose();
+        for (const d of extraDisposables) d.dispose();
+      },
     };
-  }, []);
+  }, [worldId, spec]);
 
-  useEffect(() => {
-    return () => {
-      outboundTube.dispose();
-      returnTube.dispose();
-      harmonicTube.dispose();
-    };
-  }, [outboundTube, returnTube, harmonicTube]);
+  useEffect(() => () => stationResources.disposeAll(), [stationResources]);
 
-  const pulseCount = 16;
+  const dummyM = useMemo(() => new Matrix4(), []);
+  const dummyP = useMemo(() => new Vector3(), []);
+  const dummyL = useMemo(() => new Vector3(), []);
+  const dummyUp = useMemo(() => new Vector3(0, 1, 0), []);
+  const dummyS = useMemo(() => new Vector3(), []);
 
-  useFrame(({ clock }, delta) => {
-    const t = reducedMotion ? 0 : clock.getElapsedTime();
-    if (group.current && !reducedMotion) {
-      group.current.rotation.y += delta * 0.06;
+  useFrame((state, delta) => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    // Distance-cull far stations so at most 1–2 sanctuaries render simultaneously
+    const distZ = Math.abs(position[2] - state.camera.position.z);
+    const isVisible = distZ < 76;
+    root.visible = isVisible;
+    if (!isVisible) return;
+
+    const t = reducedMotion ? 2.4 : state.clock.getElapsedTime();
+
+    // Pulse boost on Genesis button click
+    if (pulseTimeRef && pulseTimeRef.current > 0) {
+      const pulseAge = (performance.now() - pulseTimeRef.current) * 0.001;
+      const boost = pulseAge < 2.5 ? 1 + Math.sin(Math.min(1, pulseAge / 2.2) * Math.PI) * 1.1 : 1;
+      stationResources.emissiveMat.emissiveIntensity = 1.45 * boost;
+      stationResources.crystalMat.emissiveIntensity = 0.56 * boost;
     }
 
-    if (outboundParticles.current) {
-      for (let i = 0; i < pulseCount; i += 1) {
-        const u = ((t * 0.22 + i / pulseCount) % 1 + 1) % 1;
-        outboundCurve.getPointAt(u, dummy.position);
-        const s = 0.65 + Math.sin(u * Math.PI) * 0.95;
-        dummy.scale.setScalar(s);
-        dummy.updateMatrix();
-        outboundParticles.current.setMatrixAt(i, dummy.matrix);
-      }
-      outboundParticles.current.instanceMatrix.needsUpdate = true;
+    if (!reducedMotion) {
+      root.position.y = position[1] + Math.sin(t * 0.52 + position[2] * 0.05) * 0.14;
     }
 
-    if (returnParticles.current) {
-      for (let i = 0; i < pulseCount; i += 1) {
-        const u = ((t * 0.18 + i / pulseCount) % 1 + 1) % 1;
-        returnCurve.getPointAt(u, dummy.position);
-        const s = 0.65 + Math.sin(u * Math.PI) * 0.95;
-        dummy.scale.setScalar(s);
-        dummy.updateMatrix();
-        returnParticles.current.setMatrixAt(i, dummy.matrix);
+    for (const wm of stationResources.waterMats) wm.uniforms.uTime.value = t;
+    for (const wf of stationResources.waterfallMats) wf.uniforms.uTime.value = t;
+    for (const bm of stationResources.beamMats) bm.uniforms.uTime.value = t;
+
+    for (const k of stationResources.kineticItems) {
+      if (!reducedMotion) {
+        k.mesh.rotation.x += k.rotSpeed[0] * delta;
+        k.mesh.rotation.y += k.rotSpeed[1] * delta;
+        k.mesh.rotation.z += k.rotSpeed[2] * delta;
+        if (k.bobAmp > 0) {
+          k.mesh.position.y = k.basePos.y + Math.sin(t * k.bobSpeed + k.phase) * k.bobAmp;
+        }
       }
-      returnParticles.current.instanceMatrix.needsUpdate = true;
+      if (k.jellyTime) k.jellyTime.value = t;
+    }
+
+    if (stationResources.flockInst && stationResources.flockData.length > 0) {
+      const isBirds = stationResources.built.flock?.kind === "birds";
+      stationResources.flockData.forEach((ag, i) => {
+        const curA = ag.a + t * ag.speed;
+        const nextA = curA + (ag.speed >= 0 ? 0.08 : -0.08);
+        dummyP.set(
+          Math.cos(curA) * ag.r,
+          ag.h + Math.sin(t * 2.0 + ag.phase) * 0.35,
+          Math.sin(curA) * ag.r,
+        );
+        dummyL.set(Math.cos(nextA) * ag.r, dummyP.y, Math.sin(nextA) * ag.r);
+        dummyM.lookAt(dummyL, dummyP, dummyUp);
+        const flap = isBirds && !reducedMotion ? 0.76 + 0.32 * Math.sin(t * 7.2 + ag.phase) : 1.0;
+        dummyS.set(ag.scale, ag.scale * flap, ag.scale);
+        dummyM.scale(dummyS);
+        dummyM.setPosition(dummyP);
+        stationResources.flockInst!.setMatrixAt(i, dummyM);
+      });
+      stationResources.flockInst.instanceMatrix.needsUpdate = true;
     }
   });
 
-  const posX = isMobile ? 0 : 6.0;
-
   return (
-    <group ref={group} position={[posX, isMobile ? 4.3 : 2.7, -136]} scale={isMobile ? 0.72 : 1}>
-      <group position={[-4.2, -0.6, 0.8]}>
-        <mesh>
-          <icosahedronGeometry args={[0.85, 2]} />
-          <meshBasicMaterial color="#38bdf8" wireframe transparent opacity={0.82} />
-        </mesh>
-        <mesh>
-          <sphereGeometry args={[0.42, 16, 16]} />
-          <meshBasicMaterial color="#38efdf" transparent opacity={0.86} />
-        </mesh>
-      </group>
-      <group position={[4.2, 1.3, -1.2]}>
-        <mesh>
-          <icosahedronGeometry args={[1.05, 2]} />
-          <meshBasicMaterial color="#b392ff" wireframe transparent opacity={0.84} />
-        </mesh>
-        <mesh>
-          <sphereGeometry args={[0.52, 16, 16]} />
-          <meshBasicMaterial color="#f472b6" transparent opacity={0.86} />
-        </mesh>
-      </group>
-      <mesh geometry={outboundTube}>
-        <meshBasicMaterial color="#4ff0df" transparent opacity={0.62} />
-      </mesh>
-      <mesh geometry={returnTube}>
-        <meshBasicMaterial color="#f472b6" transparent opacity={0.62} />
-      </mesh>
-      <mesh geometry={harmonicTube}>
-        <meshBasicMaterial color="#a78bfa" transparent opacity={0.5} />
-      </mesh>
-      <instancedMesh ref={outboundParticles} args={[undefined, undefined, pulseCount]}>
-        <sphereGeometry args={[0.12, 10, 10]} />
-        <meshBasicMaterial color="#4ff0df" />
-      </instancedMesh>
-      <instancedMesh ref={returnParticles} args={[undefined, undefined, pulseCount]}>
-        <sphereGeometry args={[0.12, 10, 10]} />
-        <meshBasicMaterial color="#ff85a1" />
-      </instancedMesh>
-    </group>
-  );
-}
-
-/** Monument 04: Origin Horizon Spire (About) */
-function OriginSpireMonument({
-  isMobile,
-  reducedMotion,
-}: {
-  isMobile: boolean;
-  reducedMotion: boolean;
-}) {
-  const spireRef = useRef<Group>(null);
-  const haloRef = useRef<Mesh>(null);
-  const ringTwoRef = useRef<Mesh>(null);
-
-  const { coreMat, haloMat } = useMemo(() => {
-    const core = new ShaderMaterial({
-      vertexShader: coreVertexShader,
-      fragmentShader: coreFragmentShader,
-      transparent: true,
-      uniforms: {
-        uTime: { value: 0 },
-        uPulseAge: { value: 0 },
-        uBreath: { value: 0.85 },
-        uPrimaryColor: { value: new Color("#ffc46b") },
-        uSecondaryColor: { value: new Color("#fb7185") },
-        uTertiaryColor: { value: new Color("#60a5fa") },
-        uOpacity: { value: 0.96 },
-      },
-    });
-    const halo = new ShaderMaterial({
-      vertexShader: haloVertexShader,
-      fragmentShader: haloFragmentShader,
-      transparent: true,
-      depthWrite: false,
-      side: BackSide,
-      blending: AdditiveBlending,
-      uniforms: {
-        uPrimaryColor: { value: new Color("#ffc46b") },
-        uSecondaryColor: { value: new Color("#fb7185") },
-        uIntensity: { value: 0.56 },
-      },
-    });
-    return { coreMat: core, haloMat: halo };
-  }, []);
-
-  useEffect(
-    () => () => {
-      coreMat.dispose();
-      haloMat.dispose();
-    },
-    [coreMat, haloMat],
-  );
-
-  useFrame(({ clock }, delta) => {
-    const t = reducedMotion ? 0 : clock.getElapsedTime();
-    coreMat.uniforms.uTime.value = t;
-
-    if (reducedMotion) return;
-    if (spireRef.current) {
-      spireRef.current.rotation.y += delta * 0.12;
-      spireRef.current.position.y = (isMobile ? 4.8 : 4.2) + Math.sin(t * 0.6) * 0.18;
-    }
-    if (haloRef.current) {
-      haloRef.current.rotation.z -= delta * 0.1;
-    }
-    if (ringTwoRef.current) {
-      ringTwoRef.current.rotation.z += delta * 0.08;
-    }
-  });
-
-  const posX = isMobile ? 0 : 3.6;
-
-  return (
-    <group ref={spireRef} position={[posX, isMobile ? 4.8 : 4.2, -176]} scale={isMobile ? 0.78 : 1}>
-      <mesh material={coreMat}>
-        <icosahedronGeometry args={[1.65, 5]} />
-      </mesh>
-      <mesh scale={1.65} material={haloMat}>
-        <sphereGeometry args={[1.65, 32, 24]} />
-      </mesh>
-      <mesh>
-        <octahedronGeometry args={[2.15, 0]} />
-        <meshBasicMaterial color="#ffc46b" wireframe transparent opacity={0.78} />
-      </mesh>
-      <mesh position={[0, -2.6, 0]}>
-        <cylinderGeometry args={[0.025, 0.34, 4.8, 10]} />
-        <meshBasicMaterial color="#fb7185" transparent opacity={0.68} />
-      </mesh>
-      <mesh ref={haloRef} rotation={[Math.PI * 0.44, 0.18, 0]} position={[0, -1.4, 0]}>
-        <torusGeometry args={[4.6, 0.026, 16, 120]} />
-        <meshBasicMaterial color="#ffc46b" transparent opacity={0.62} />
-      </mesh>
-      <mesh ref={ringTwoRef} rotation={[-Math.PI * 0.36, -0.22, 0.16]} position={[0, -1.4, 0]}>
-        <torusGeometry args={[6.5, 0.022, 16, 120]} />
-        <meshBasicMaterial color="#fb7185" transparent opacity={0.5} />
-      </mesh>
-      <mesh rotation={[Math.PI * 0.25, 0.35, -0.18]} position={[0, -1.4, 0]}>
-        <torusGeometry args={[8.4, 0.018, 16, 120]} />
-        <meshBasicMaterial color="#60a5fa" transparent opacity={0.44} />
-      </mesh>
+    <group ref={rootRef} position={position} rotation={[0, yaw, 0]} scale={scale}>
+      <primitive object={stationResources.group} />
     </group>
   );
 }
@@ -1017,24 +900,28 @@ export function WorldScene(props: WorldSceneProps) {
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
 
+  const heroWorldId: WorldId = props.heroWorldId ?? "aether-sanctuary";
+  const m = props.isMobile;
+
   return (
     <Canvas
       className="world-canvas"
       frameloop={pageVisible ? "always" : "never"}
-      dpr={[1, props.isMobile ? 1.35 : 1.65]}
-      camera={{ position: [-1.4, 3.2, 6], fov: 49, near: 0.1, far: 340 }}
+      dpr={[1, m ? 1.35 : 1.65]}
+      camera={{ position: [-1.6, 4.1, 7.2], fov: 48, near: 0.1, far: 340 }}
       gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
       onCreated={({ gl }) => {
         gl.setClearColor(0x000000, 0);
         gl.outputColorSpace = SRGBColorSpace;
         gl.toneMapping = ACESFilmicToneMapping;
-        gl.toneMappingExposure = 1.24;
+        gl.toneMappingExposure = 1.04;
       }}
     >
-      <fogExp2 attach="fog" args={["#050e1d", 0.0092]} />
-      <AtmosphereDirector scrollProgressRef={props.scrollProgressRef} />
+      <fogExp2 attach="fog" args={["#071126", 0.0086]} />
+      <ProceduralEnvironmentSetup />
+      <AtmosphereDirector scrollProgressRef={props.scrollProgressRef} heroWorldId={heroWorldId} />
 
-      <AdaptiveQuality isMobile={props.isMobile} />
+      <AdaptiveQuality isMobile={m} />
       <NebulaSkyDome
         scrollProgressRef={props.scrollProgressRef}
         pulseTimeRef={props.pulseTimeRef}
@@ -1043,24 +930,61 @@ export function WorldScene(props: WorldSceneProps) {
       <CameraSplineRig
         scrollProgressRef={props.scrollProgressRef}
         pointerRef={props.pointerRef}
-        isMobile={props.isMobile}
+        isMobile={m}
         reducedMotion={props.reducedMotion}
       />
       <TopographicSea {...props} />
       <AstralParticles
         pulseTimeRef={props.pulseTimeRef}
-        isMobile={props.isMobile}
+        isMobile={m}
         reducedMotion={props.reducedMotion}
       />
-      <AstrolabeMonument
+
+      {/* Station 00 (Home / Hero): Live Switchable Wonder World (defaults to Aether Sanctuary) */}
+      <BackdropSanctuaryStation
+        worldId={heroWorldId}
+        position={[m ? 0.2 : 6.7, m ? -0.35 : -0.32, -18.2]}
+        yaw={-0.38}
+        scale={m ? 0.30 : 0.40}
         pulseTimeRef={props.pulseTimeRef}
-        isMobile={props.isMobile}
         reducedMotion={props.reducedMotion}
       />
-      <StoryArchipelagoMonument isMobile={props.isMobile} reducedMotion={props.reducedMotion} />
-      <LivingMemoryMonument isMobile={props.isMobile} reducedMotion={props.reducedMotion} />
-      <SynapseBridgeMonument isMobile={props.isMobile} reducedMotion={props.reducedMotion} />
-      <OriginSpireMonument isMobile={props.isMobile} reducedMotion={props.reducedMotion} />
+
+      {/* Station 01 (Imagine): Chronos Astrolabe Citadel */}
+      <BackdropSanctuaryStation
+        worldId="astral-citadel"
+        position={[m ? 0.0 : 5.8, -0.1, -57.5]}
+        yaw={-0.32}
+        scale={m ? 0.30 : 0.40}
+        reducedMotion={props.reducedMotion}
+      />
+
+      {/* Station 02 (Alive): Bioluminescent Abyssal Sanctuary */}
+      <BackdropSanctuaryStation
+        worldId="abyssal-garden"
+        position={[m ? 0.0 : -5.8, -0.45, -97.5]}
+        yaw={0.35}
+        scale={m ? 0.30 : 0.40}
+        reducedMotion={props.reducedMotion}
+      />
+
+      {/* Station 03 (Connect): Aurora Crystal Fjord */}
+      <BackdropSanctuaryStation
+        worldId="aurora-prism"
+        position={[m ? 0.0 : 5.8, -0.35, -137.5]}
+        yaw={-0.34}
+        scale={m ? 0.30 : 0.40}
+        reducedMotion={props.reducedMotion}
+      />
+
+      {/* Station 04 (About): Solaris Mirage Oasis */}
+      <BackdropSanctuaryStation
+        worldId="solaris-oasis"
+        position={[m ? 0.0 : 4.4, 0.35, -177.5]}
+        yaw={-0.28}
+        scale={m ? 0.31 : 0.41}
+        reducedMotion={props.reducedMotion}
+      />
     </Canvas>
   );
 }

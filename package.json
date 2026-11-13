@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build && node scripts/prerender.mjs",
     "preview": "vite preview",
     "fonts:subset": "uv run --with fonttools,brotli python3 scripts/subset_fonts.py",
+    "worlds:render": "node scripts/generate-world-renders.mjs",
     "og:generate": "node scripts/generate-og.mjs",
     "qa:local": "node scripts/qa-local.mjs"
   },

@@ -2,6 +2,7 @@ import {
   ArrowDown,
   ArrowUpRight,
   Check,
+  Compass,
   Copy,
   Mail,
   Sparkles,
@@ -17,6 +18,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type MouseEvent,
   type ReactNode,
 } from "react";
@@ -37,10 +39,14 @@ import {
   type Locale,
   type RealmId,
 } from "./i18n";
+import { WorldGallery } from "./WorldGallery";
+import { WORLD_IDS, WORLD_SPECS, type WorldId } from "./worlds/worldRegistry";
 
 const WorldScene = lazy(() =>
   import("./WorldScene").then((module) => ({ default: module.WorldScene })),
 );
+
+const SanctuaryExplorerModal = lazy(() => import("./SanctuaryExplorerModal"));
 
 const REALM_FREQUENCIES: Record<RealmId, [number, number, number]> = {
   home: [55, 82.5, 110],
@@ -202,7 +208,7 @@ function updateDocumentMeta(locale: Locale, realm: RealmId) {
 
   document.title = meta.title;
   document.documentElement.lang = locale;
-  document.querySelector('meta[name="description"]')?.setAttribute("content", meta.description);
+  document.querySelector('meta[name="description"]')?.setAttribute("content", meta.title ? meta.description : "");
   document.querySelector('meta[property="og:title"]')?.setAttribute("content", meta.title);
   document.querySelector('meta[property="og:description"]')?.setAttribute("content", meta.description);
   document.querySelector('meta[property="og:url"]')?.setAttribute("content", canonicalUrl);
@@ -224,6 +230,28 @@ const REALM_SCROLL_INDEX: Record<RealmId, number> = {
   about: 1,
 };
 
+function computePiecewiseScrollProgress(): number {
+  const scrollY = window.scrollY;
+  const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+  const anchors: number[] = REALM_IDS.map((id, idx) => {
+    if (idx === 0) return 0;
+    const el = document.getElementById(`section-${id}`);
+    if (!el) return (idx / (REALM_IDS.length - 1)) * maxScroll;
+    return Math.min(maxScroll, Math.max(0, el.offsetTop - window.innerHeight * 0.08));
+  });
+
+  if (scrollY <= anchors[0]) return 0;
+  for (let i = 0; i < anchors.length - 1; i += 1) {
+    const a = anchors[i];
+    const b = Math.max(a + 1, anchors[i + 1]);
+    if (scrollY <= b) {
+      const local = (scrollY - a) / (b - a);
+      return (i + local) / (anchors.length - 1);
+    }
+  }
+  return 1;
+}
+
 function App() {
   const initialParsed = useMemo(
     () => parseLocation(window.location.pathname, window.location.search),
@@ -233,8 +261,16 @@ function App() {
   const ogMode = searchParams.get("og") === "1";
   const ogRealm = (searchParams.get("realm") as RealmId | null) ?? initialParsed.realm;
 
+  const worldCaptureRaw = searchParams.get("worldCapture");
+  const worldCaptureId = WORLD_IDS.includes(worldCaptureRaw as WorldId)
+    ? (worldCaptureRaw as WorldId)
+    : null;
+  const captureShotVariant = searchParams.get("shot") === "alt" ? "alt" : "primary";
+
   const [locale, setLocale] = useState<Locale>(initialParsed.locale);
   const [activeRealm, setActiveRealm] = useState<RealmId>(ogMode ? ogRealm : initialParsed.realm);
+  const [heroWorldId, setHeroWorldId] = useState<WorldId>("aether-sanctuary");
+  const [explorerWorldId, setExplorerWorldId] = useState<WorldId | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [pulsed, setPulsed] = useState(false);
   const [copiedEmail, setCopiedEmail] = useState(false);
@@ -258,15 +294,24 @@ function App() {
   activeRealmRef.current = activeRealm;
   localeRef.current = locale;
 
-  useAmbientSound(soundEnabled && !ogMode, activeRealm);
+  useAmbientSound(soundEnabled && !ogMode && !worldCaptureId, activeRealm);
 
   const copy = CONTENT[locale];
+  const isZh = locale === "zh-CN";
 
   const triggerPulse = useCallback(() => {
     pulseTimeRef.current = performance.now();
     setPulsed(true);
     window.setTimeout(() => setPulsed(false), 2400);
   }, []);
+
+  const handleSelectHeroWorld = useCallback(
+    (nextWorld: WorldId) => {
+      setHeroWorldId(nextWorld);
+      triggerPulse();
+    },
+    [triggerPulse],
+  );
 
   const scrollToRealm = useCallback(
     (realm: RealmId, instant = false) => {
@@ -324,18 +369,18 @@ function App() {
 
   // Scroll to initial section if landed directly on /imagine, /alive, /connect, or /about
   useEffect(() => {
-    if (ogMode) return;
+    if (ogMode || worldCaptureId) return;
     if (initialParsed.realm !== "home") {
       window.requestAnimationFrame(() => {
         scrollToRealm(initialParsed.realm, true);
       });
     }
     updateDocumentMeta(initialParsed.locale, initialParsed.realm);
-  }, [initialParsed.locale, initialParsed.realm, ogMode, scrollToRealm]);
+  }, [initialParsed.locale, initialParsed.realm, ogMode, scrollToRealm, worldCaptureId]);
 
   // Listen to browser Back / Forward
   useEffect(() => {
-    if (ogMode) return;
+    if (ogMode || worldCaptureId) return;
     const onPopState = () => {
       const parsed = parseLocation(window.location.pathname, window.location.search);
       setLocale(parsed.locale);
@@ -346,17 +391,16 @@ function App() {
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [ogMode, scrollToRealm]);
+  }, [ogMode, scrollToRealm, worldCaptureId]);
 
-  // Single rAF-throttled scroll tracker driving both 3D spline and clean URL sync
+  // Single rAF-throttled scroll tracker driving both piecewise 3D spline and clean URL sync
   useEffect(() => {
-    if (ogMode) return;
+    if (ogMode || worldCaptureId) return;
     let frameId = 0;
 
     const updateFromScroll = () => {
       frameId = 0;
-      const docHeight = document.documentElement.scrollHeight - window.innerHeight;
-      const ratio = docHeight > 0 ? Math.min(1, Math.max(0, window.scrollY / docHeight)) : 0;
+      const ratio = computePiecewiseScrollProgress();
       scrollProgressRef.current = ratio;
       setScrollUiProgress(ratio);
 
@@ -399,7 +443,7 @@ function App() {
       window.removeEventListener("resize", onScroll);
       if (frameId) window.cancelAnimationFrame(frameId);
     };
-  }, [ogMode]);
+  }, [ogMode, worldCaptureId]);
 
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const nx = (event.clientX / window.innerWidth) * 2 - 1;
@@ -419,6 +463,24 @@ function App() {
   const activeIndexStr =
     copy.nav.items.find((item) => item.id === activeRealm)?.index ?? "00";
 
+  // Dedicated Clean Capture Mode for Automated HD Pure-Code World Renders
+  if (worldCaptureId) {
+    const captureSpec = WORLD_SPECS[worldCaptureId];
+    const shotCfg =
+      captureShotVariant === "alt" ? captureSpec.altCapture : captureSpec.primaryCapture;
+    return (
+      <Suspense fallback={null}>
+        <SanctuaryExplorerModal
+          initialWorldId={worldCaptureId}
+          locale={locale}
+          captureMode={true}
+          initialPhaseOverride={shotCfg.phase}
+          initialCameraOverride={shotCfg.camera}
+        />
+      </Suspense>
+    );
+  }
+
   if (ogMode) {
     const ogMeta = copy.routeMeta[ogRealm];
     return (
@@ -432,6 +494,7 @@ function App() {
                   scrollProgressRef={scrollProgressRef}
                   pointerRef={pointerRef}
                   pulseTimeRef={pulseTimeRef}
+                  heroWorldId="aether-sanctuary"
                   isMobile={false}
                   reducedMotion={true}
                 />
@@ -457,19 +520,21 @@ function App() {
   }
 
   const nextLocale = otherLocale(locale);
+  const currentHeroWorldCopy = WORLD_SPECS[heroWorldId].copy[locale];
 
   return (
     <div className={`world-app locale-${locale}`} data-realm={activeRealm} onPointerMove={handlePointerMove}>
-      {/* Persistent 3D World Backdrop */}
+      {/* Persistent 5-Sanctuary 3D World Backdrop */}
       <div className="cosmos-backdrop" aria-hidden="true">
         <div className="cosmos-aurora-wash" />
-        {webglSupported ? (
+        {webglSupported && !explorerWorldId ? (
           <SceneBoundary fallback={<AstralStaticBackdrop activeRealm={activeRealm} />}>
             <Suspense fallback={<AstralStaticBackdrop activeRealm={activeRealm} />}>
               <WorldScene
                 scrollProgressRef={scrollProgressRef}
                 pointerRef={pointerRef}
                 pulseTimeRef={pulseTimeRef}
+                heroWorldId={heroWorldId}
                 isMobile={isMobile}
                 reducedMotion={reducedMotion}
               />
@@ -564,56 +629,106 @@ function App() {
 
       {/* Main Continuous Five-Act Spatial Track */}
       <main className="world-track">
-        {/* ACT 00: THRESHOLD / HOME */}
+        {/* ACT 00: THRESHOLD / HOME + SIX PROCEDURAL WORLDS GALLERY */}
         <section id="section-home" className="realm-section realm-home" aria-labelledby="hero-title">
-          <div className="hero-column">
-            <span className="eyebrow">{copy.hero.eyebrow}</span>
-            {!webglSupported && (
-              <span className="fallback-pill">{copy.controls.webglFallbackBadge}</span>
-            )}
-            <h1 id="hero-title">
-              <span>{copy.hero.titleLine1}</span>
-              <em>{copy.hero.titleLine2}</em>
-            </h1>
-            <p className="hero-lead">{copy.hero.lead}</p>
+          <div className="hero-fold">
+            <div className="hero-column">
+              <span className="eyebrow">{copy.hero.eyebrow}</span>
+              {!webglSupported && (
+                <span className="fallback-pill">{copy.controls.webglFallbackBadge}</span>
+              )}
+              <h1 id="hero-title">
+                <span>{copy.hero.titleLine1}</span>
+                <em>{copy.hero.titleLine2}</em>
+              </h1>
+              <p className="hero-lead">{copy.hero.lead}</p>
 
-            <div className="hero-actions">
-              <button
-                type="button"
-                className={`btn-primary${pulsed ? " is-pulsed" : ""}`}
-                onClick={triggerPulse}
-              >
-                <Sparkles size={16} aria-hidden="true" />
-                <span>{pulsed ? copy.controls.pulseDone : copy.controls.pulseGenesis}</span>
-              </button>
-              <a
-                className="btn-secondary"
-                href={buildPath(locale, "imagine")}
-                onClick={(e) => navigateRealm("imagine", e)}
-              >
-                <span>{copy.controls.exploreWorld}</span>
-                <ArrowDown size={15} aria-hidden="true" />
-              </a>
+              <div className="hero-actions">
+                <button
+                  type="button"
+                  className={`btn-primary${pulsed ? " is-pulsed" : ""}`}
+                  onClick={triggerPulse}
+                >
+                  <Sparkles size={16} aria-hidden="true" />
+                  <span>{pulsed ? copy.controls.pulseDone : copy.controls.pulseGenesis}</span>
+                </button>
+                {webglSupported && (
+                  <button
+                    type="button"
+                    className="btn-enter-hero-world"
+                    onClick={() => setExplorerWorldId(heroWorldId)}
+                  >
+                    <Compass size={16} aria-hidden="true" />
+                    <span>
+                      {isZh
+                        ? `进入「${currentHeroWorldCopy.title}」漫游`
+                        : `Enter ${currentHeroWorldCopy.title}`}
+                    </span>
+                  </button>
+                )}
+                <a
+                  className="btn-secondary"
+                  href="#world-gallery"
+                >
+                  <span>{isZh ? "浏览六大奇观" : "Browse 6 Worlds"}</span>
+                  <ArrowDown size={15} aria-hidden="true" />
+                </a>
+              </div>
+
+              {/* Instant Live Hero 3D World Switcher */}
+              {webglSupported && (
+                <div className="hero-world-strip" aria-label={isZh ? "切换首屏实时 3D 奇观" : "Switch Hero 3D World"}>
+                  <span className="hero-strip-label">
+                    {isZh ? "实时背景奇观：" : "Live 3D Stage:"}
+                  </span>
+                  <div className="hero-strip-pills">
+                    {WORLD_IDS.map((id) => {
+                      const w = WORLD_SPECS[id];
+                      const active = id === heroWorldId;
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          className={`hero-world-pill${active ? " is-active" : ""}`}
+                          style={{ "--pill-accent": w.accentPrimary } as CSSProperties}
+                          onClick={() => handleSelectHeroWorld(id)}
+                        >
+                          <small>{w.code}</small>
+                          <span>{w.copy[locale].title}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="hero-pillars" aria-label={copy.controls.scrollCue}>
+              {copy.hero.pillars.map((pillar) => (
+                <a
+                  key={pillar.realm}
+                  href={buildPath(locale, pillar.realm)}
+                  className={`pillar-card pillar-${pillar.realm}`}
+                  onClick={(e) => navigateRealm(pillar.realm, e)}
+                >
+                  <div className="pillar-top">
+                    <span className="pillar-index">{pillar.index}</span>
+                    <ArrowUpRight size={15} aria-hidden="true" />
+                  </div>
+                  <strong>{pillar.title}</strong>
+                  <small>{pillar.subtitle}</small>
+                </a>
+              ))}
             </div>
           </div>
 
-          <div className="hero-pillars" aria-label={copy.controls.scrollCue}>
-            {copy.hero.pillars.map((pillar) => (
-              <a
-                key={pillar.realm}
-                href={buildPath(locale, pillar.realm)}
-                className={`pillar-card pillar-${pillar.realm}`}
-                onClick={(e) => navigateRealm(pillar.realm, e)}
-              >
-                <div className="pillar-top">
-                  <span className="pillar-index">{pillar.index}</span>
-                  <ArrowUpRight size={15} aria-hidden="true" />
-                </div>
-                <strong>{pillar.title}</strong>
-                <small>{pillar.subtitle}</small>
-              </a>
-            ))}
-          </div>
+          {/* Panoramic Six Pure-Code Worlds Gallery fused directly into Homepage */}
+          <WorldGallery
+            locale={locale}
+            heroWorldId={heroWorldId}
+            onSelectHeroWorld={handleSelectHeroWorld}
+            onEnterWorld={(id) => setExplorerWorldId(id)}
+          />
         </section>
 
         {/* ACT 01: IMAGINE */}
@@ -633,6 +748,19 @@ function App() {
               <h2 id="imagine-title">{copy.realms.imagine.title}</h2>
               <p className="realm-lead">{copy.realms.imagine.lead}</p>
               <p className="realm-copy">{copy.realms.imagine.copy}</p>
+              {webglSupported && (
+                <button
+                  type="button"
+                  className="realm-portal-chip"
+                  onClick={() => setExplorerWorldId("astral-citadel")}
+                >
+                  <Compass size={14} aria-hidden="true" />
+                  <span>
+                    {isZh ? "步入本幕 3D 奇观：星轨悬城" : "Enter Realm 3D: Chronos Citadel"}
+                  </span>
+                  <ArrowUpRight size={14} aria-hidden="true" />
+                </button>
+              )}
             </header>
 
             <ImagineConstellationDiagram nodes={copy.diagrams.imagineNodes} />
@@ -672,6 +800,19 @@ function App() {
               <h2 id="alive-title">{copy.realms.alive.title}</h2>
               <p className="realm-lead">{copy.realms.alive.lead}</p>
               <p className="realm-copy">{copy.realms.alive.copy}</p>
+              {webglSupported && (
+                <button
+                  type="button"
+                  className="realm-portal-chip"
+                  onClick={() => setExplorerWorldId("abyssal-garden")}
+                >
+                  <Compass size={14} aria-hidden="true" />
+                  <span>
+                    {isZh ? "步入本幕 3D 奇观：荧光灵渊" : "Enter Realm 3D: Abyssal Sanctuary"}
+                  </span>
+                  <ArrowUpRight size={14} aria-hidden="true" />
+                </button>
+              )}
             </header>
 
             <AliveMemoryTriadDiagram rings={copy.diagrams.aliveRings} />
@@ -711,6 +852,19 @@ function App() {
               <h2 id="connect-title">{copy.realms.connect.title}</h2>
               <p className="realm-lead">{copy.realms.connect.lead}</p>
               <p className="realm-copy">{copy.realms.connect.copy}</p>
+              {webglSupported && (
+                <button
+                  type="button"
+                  className="realm-portal-chip"
+                  onClick={() => setExplorerWorldId("aurora-prism")}
+                >
+                  <Compass size={14} aria-hidden="true" />
+                  <span>
+                    {isZh ? "步入本幕 3D 奇观：极光琉璃境" : "Enter Realm 3D: Aurora Crystal Fjord"}
+                  </span>
+                  <ArrowUpRight size={14} aria-hidden="true" />
+                </button>
+              )}
             </header>
 
             <div className="chapter-stack">
@@ -750,6 +904,19 @@ function App() {
                   <p key={p}>{p}</p>
                 ))}
               </div>
+              {webglSupported && (
+                <button
+                  type="button"
+                  className="realm-portal-chip"
+                  onClick={() => setExplorerWorldId("solaris-oasis")}
+                >
+                  <Compass size={14} aria-hidden="true" />
+                  <span>
+                    {isZh ? "步入本幕 3D 奇观：破晓金沙神殿" : "Enter Realm 3D: Solaris Mirage Oasis"}
+                  </span>
+                  <ArrowUpRight size={14} aria-hidden="true" />
+                </button>
+              )}
             </div>
 
             <div className="about-links">
@@ -809,6 +976,21 @@ function App() {
           );
         })}
       </nav>
+
+      {/* Full-Screen Interactive Pure-Code 3D World Explorer Modal */}
+      {explorerWorldId && webglSupported && (
+        <Suspense fallback={null}>
+          <SanctuaryExplorerModal
+            initialWorldId={explorerWorldId}
+            locale={locale}
+            onClose={() => setExplorerWorldId(null)}
+            onSelectBackdrop={(id) => {
+              handleSelectHeroWorld(id);
+              setExplorerWorldId(null);
+            }}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

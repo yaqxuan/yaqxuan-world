@@ -1,9 +1,24 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+
+function resolveBrowserExecutable() {
+  if (process.env.PLAYWRIGHT_BROWSER_PATH && existsSync(process.env.PLAYWRIGHT_BROWSER_PATH)) {
+    return process.env.PLAYWRIGHT_BROWSER_PATH;
+  }
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, "Library/Caches/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    path.join(home, "Library/Caches/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  ];
+  return candidates.find((p) => existsSync(p));
+}
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const EXTERNAL_BASE_URL = process.env.YAQXUAN_BASE_URL;
@@ -38,11 +53,12 @@ async function run() {
     await waitForServer(BASE_URL);
   }
 
-  const executablePath = process.env.PLAYWRIGHT_BROWSER_PATH;
+  const executablePath = resolveBrowserExecutable();
+  const angleBackend = process.platform === "darwin" ? "metal" : "swiftshader";
   const browser = await chromium.launch({
     ...(executablePath ? { executablePath } : {}),
     headless: true,
-    args: ["--disable-background-timer-throttling", "--use-gl=angle", "--use-angle=swiftshader"],
+    args: ["--disable-background-timer-throttling", "--use-gl=angle", `--use-angle=${angleBackend}`],
   });
 
   const runtimeErrors = [];
@@ -84,6 +100,33 @@ async function run() {
     await page.waitForTimeout(450);
     await page.screenshot({ path: path.join(OUTPUT_DIR, "home-1920.png") });
 
+    // Verify 6-World Gallery, HD renders & Interactive 3D Explorer Modal
+    assert.equal(await page.locator(".world-portal-card").count(), 6);
+    assert.equal(await page.locator(".hero-world-pill").count(), 6);
+    await page.locator(".world-spotlight-card").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(550);
+    const imgWidth = await page.evaluate(() => {
+      const img = document.querySelector(".spotlight-img.is-visible");
+      return img instanceof HTMLImageElement ? img.naturalWidth : 0;
+    });
+    assert.equal(imgWidth, 1600, "Spotlight HD WebP render should load at 1600px naturalWidth");
+    await page.screenshot({ path: path.join(OUTPUT_DIR, "gallery-1920.png") });
+
+    // Open Full-Screen 3D Sanctuary Explorer, switch world, capture, and close
+    await page.locator(".btn-enter-world").click();
+    await page.locator(".sanctuary-explorer-modal .explorer-canvas-host canvas").waitFor({
+      state: "visible",
+      timeout: 12000,
+    });
+    await page.waitForTimeout(650);
+    await page.locator(".explorer-world-tab").nth(2).click();
+    await page.waitForTimeout(750);
+    await page.screenshot({ path: path.join(OUTPUT_DIR, "explorer-1920.png") });
+    await page.locator(".explorer-btn-close").click();
+    await page.locator(".sanctuary-explorer-modal").waitFor({ state: "detached" });
+    await page.locator(".world-canvas canvas").waitFor({ state: "visible", timeout: 8000 });
+    assert.equal(await page.locator(".world-canvas canvas").count(), 1);
+
     // Verify all 9 chapters & roadmap & about links exist without popups
     assert.equal(await page.locator(".chapter-card").count(), 9);
     assert.equal(await page.locator('a[href="https://yaqxuan.xyz"]').count(), 1);
@@ -115,7 +158,7 @@ async function run() {
     await page.screenshot({ path: path.join(OUTPUT_DIR, "imagine-1920.png") });
 
     await page.locator("#section-about").scrollIntoViewIfNeeded();
-    await page.waitForTimeout(550);
+    await page.waitForTimeout(950);
     await page.screenshot({ path: path.join(OUTPUT_DIR, "about-1920.png") });
 
     // Sound toggle check
