@@ -1,5 +1,5 @@
 import { Check, Compass, Eye, Layers, Sparkles } from "lucide-react";
-import { useState, type CSSProperties } from "react";
+import { memo, useState, type CSSProperties } from "react";
 import type { Locale } from "./i18n";
 import { WORLD_IDS, WORLD_SPECS, type WorldId } from "./worlds/worldRegistry";
 
@@ -10,7 +10,7 @@ export interface WorldGalleryProps {
   onEnterWorld: (worldId: WorldId) => void;
 }
 
-export function WorldGallery({
+export const WorldGallery = memo(function WorldGallery({
   locale,
   heroWorldId,
   onSelectHeroWorld,
@@ -278,4 +278,4 @@ export function WorldGallery({
       </div>
     </div>
   );
-}
+});

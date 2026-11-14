@@ -230,16 +230,27 @@ const REALM_SCROLL_INDEX: Record<RealmId, number> = {
   about: 1,
 };
 
-function computePiecewiseScrollProgress(): number {
-  const scrollY = window.scrollY;
-  const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-  const anchors: number[] = REALM_IDS.map((id, idx) => {
-    if (idx === 0) return 0;
-    const el = document.getElementById(`section-${id}`);
-    if (!el) return (idx / (REALM_IDS.length - 1)) * maxScroll;
-    return Math.min(maxScroll, Math.max(0, el.offsetTop - window.innerHeight * 0.08));
-  });
+type SectionLayoutMetrics = {
+  maxScroll: number;
+  anchors: number[];
+  tops: number[];
+};
 
+function measureSectionLayout(): SectionLayoutMetrics {
+  const vh = window.innerHeight;
+  const maxScroll = Math.max(1, document.documentElement.scrollHeight - vh);
+  const tops: number[] = [];
+  const anchors: number[] = REALM_IDS.map((id, idx) => {
+    const el = document.getElementById(`section-${id}`);
+    const top = el ? el.offsetTop : (idx / (REALM_IDS.length - 1)) * maxScroll;
+    tops.push(top);
+    if (idx === 0) return 0;
+    return Math.min(maxScroll, Math.max(0, top - vh * 0.08));
+  });
+  return { maxScroll, anchors, tops };
+}
+
+function computeScrollRatioFromMetrics(scrollY: number, anchors: number[]): number {
   if (scrollY <= anchors[0]) return 0;
   for (let i = 0; i < anchors.length - 1; i += 1) {
     const a = anchors[i];
@@ -274,17 +285,21 @@ function App() {
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [pulsed, setPulsed] = useState(false);
   const [copiedEmail, setCopiedEmail] = useState(false);
-  const [scrollUiProgress, setScrollUiProgress] = useState(() =>
-    ogMode ? REALM_SCROLL_INDEX[ogRealm] : REALM_SCROLL_INDEX[initialParsed.realm],
-  );
 
   const isMobile = useMediaQuery("(max-width: 900px)");
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const webglSupported = useMemo(() => supportsWebGL2(), []);
 
-  const scrollProgressRef = useRef(
-    ogMode ? REALM_SCROLL_INDEX[ogRealm] : REALM_SCROLL_INDEX[initialParsed.realm],
-  );
+  const initialScrollRatio = ogMode
+    ? REALM_SCROLL_INDEX[ogRealm]
+    : REALM_SCROLL_INDEX[initialParsed.realm];
+  const scrollProgressRef = useRef(initialScrollRatio);
+  const compassFillRef = useRef<HTMLDivElement>(null);
+  const layoutMetricsRef = useRef<SectionLayoutMetrics>({
+    maxScroll: 1,
+    anchors: [0, 0.25, 0.5, 0.75, 1],
+    tops: [0, 0, 0, 0, 0],
+  });
   const pointerRef = useRef({ x: 0, y: 0 });
   const pulseTimeRef = useRef(0);
   const lockSyncUntilRef = useRef(0);
@@ -393,27 +408,29 @@ function App() {
     return () => window.removeEventListener("popstate", onPopState);
   }, [ogMode, scrollToRealm, worldCaptureId]);
 
-  // Single rAF-throttled scroll tracker driving both piecewise 3D spline and clean URL sync
+  // Single rAF-throttled scroll tracker with cached layout metrics (0 DOM reflows & 0 React re-renders per scroll frame)
   useEffect(() => {
     if (ogMode || worldCaptureId) return;
-    let frameId = 0;
+    let scrollFrameId = 0;
+    let measureFrameId = 0;
 
     const updateFromScroll = () => {
-      frameId = 0;
-      const ratio = computePiecewiseScrollProgress();
+      scrollFrameId = 0;
+      const scrollY = window.scrollY;
+      const { anchors, tops } = layoutMetricsRef.current;
+      const ratio = computeScrollRatioFromMetrics(scrollY, anchors);
       scrollProgressRef.current = ratio;
-      setScrollUiProgress(ratio);
+      if (compassFillRef.current) {
+        compassFillRef.current.style.transform = `scaleY(${Math.max(0.05, ratio).toFixed(4)})`;
+      }
 
       if (performance.now() < lockSyncUntilRef.current) return;
 
-      const marker = window.innerHeight * 0.42;
+      const marker = scrollY + window.innerHeight * 0.42;
       let detected: RealmId = "home";
-      for (const id of REALM_IDS) {
-        const el = document.getElementById(`section-${id}`);
-        if (!el) continue;
-        const rect = el.getBoundingClientRect();
-        if (rect.top <= marker) {
-          detected = id;
+      for (let i = 0; i < REALM_IDS.length; i += 1) {
+        if (tops[i] <= marker) {
+          detected = REALM_IDS[i];
         }
       }
 
@@ -428,29 +445,55 @@ function App() {
       }
     };
 
-    const onScroll = () => {
-      if (!frameId) {
-        frameId = window.requestAnimationFrame(updateFromScroll);
+    const refreshLayoutAndScroll = () => {
+      measureFrameId = 0;
+      layoutMetricsRef.current = measureSectionLayout();
+      updateFromScroll();
+    };
+
+    const scheduleScroll = () => {
+      if (!scrollFrameId) {
+        scrollFrameId = window.requestAnimationFrame(updateFromScroll);
       }
     };
 
-    window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll, { passive: true });
+    const scheduleMeasure = () => {
+      if (!measureFrameId) {
+        measureFrameId = window.requestAnimationFrame(refreshLayoutAndScroll);
+      }
+    };
+
+    layoutMetricsRef.current = measureSectionLayout();
     updateFromScroll();
 
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
-      if (frameId) window.cancelAnimationFrame(frameId);
-    };
-  }, [ogMode, worldCaptureId]);
+    window.addEventListener("scroll", scheduleScroll, { passive: true });
+    window.addEventListener("resize", scheduleMeasure, { passive: true });
 
-  const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    const nx = (event.clientX / window.innerWidth) * 2 - 1;
-    const ny = -((event.clientY / window.innerHeight) * 2 - 1);
-    pointerRef.current.x = nx;
-    pointerRef.current.y = ny;
-  }, []);
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(scheduleMeasure);
+      const trackEl = document.querySelector(".world-track");
+      if (trackEl) resizeObserver.observe(trackEl);
+    }
+
+    return () => {
+      window.removeEventListener("scroll", scheduleScroll);
+      window.removeEventListener("resize", scheduleMeasure);
+      resizeObserver?.disconnect();
+      if (scrollFrameId) window.cancelAnimationFrame(scrollFrameId);
+      if (measureFrameId) window.cancelAnimationFrame(measureFrameId);
+    };
+  }, [locale, ogMode, worldCaptureId]);
+
+  useEffect(() => {
+    if (ogMode || worldCaptureId || isMobile || reducedMotion) return;
+    const onPointerMove = (event: PointerEvent) => {
+      pointerRef.current.x = (event.clientX / window.innerWidth) * 2 - 1;
+      pointerRef.current.y = -((event.clientY / window.innerHeight) * 2 - 1);
+    };
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+    return () => window.removeEventListener("pointermove", onPointerMove);
+  }, [isMobile, ogMode, reducedMotion, worldCaptureId]);
 
   const handleCopyEmail = useCallback(() => {
     const email = copy.about.links.email.value;
@@ -523,7 +566,7 @@ function App() {
   const currentHeroWorldCopy = WORLD_SPECS[heroWorldId].copy[locale];
 
   return (
-    <div className={`world-app locale-${locale}`} data-realm={activeRealm} onPointerMove={handlePointerMove}>
+    <div className={`world-app locale-${locale}`} data-realm={activeRealm}>
       {/* Persistent 5-Sanctuary 3D World Backdrop */}
       <div className="cosmos-backdrop" aria-hidden="true">
         <div className="cosmos-aurora-wash" />
@@ -608,8 +651,9 @@ function App() {
       <aside className="astral-compass" aria-hidden="true">
         <div className="compass-track">
           <div
+            ref={compassFillRef}
             className="compass-fill"
-            style={{ transform: `scaleY(${Math.max(0.05, scrollUiProgress)})` }}
+            style={{ transform: `scaleY(${Math.max(0.05, initialScrollRatio)})` }}
           />
         </div>
         <div className="compass-ticks">

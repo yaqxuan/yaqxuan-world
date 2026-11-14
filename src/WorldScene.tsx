@@ -19,15 +19,14 @@ import {
   MathUtils,
   Matrix4,
   Mesh,
+  MeshLambertMaterial,
   MeshStandardMaterial,
-  PMREMGenerator,
   Quaternion,
   ShaderMaterial,
   SRGBColorSpace,
   Vector2,
   Vector3,
 } from "three";
-import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import {
   nebulaFragmentShader,
   nebulaVertexShader,
@@ -50,8 +49,6 @@ import {
   jellyfishVertexShader,
   sanctuaryBeamFragmentShader,
   sanctuaryBeamVertexShader,
-  sanctuaryCloudFragmentShader,
-  sanctuaryCloudVertexShader,
   sanctuaryWaterfallFragmentShader,
   sanctuaryWaterfallVertexShader,
   sanctuaryWaterFragmentShader,
@@ -88,56 +85,6 @@ function interpolateStops(colors: Color[], scroll: number, out: Color) {
   const idx = Math.min(Math.floor(scaled), maxIdx - 1);
   const localT = scaled - idx;
   out.copy(colors[idx]).lerp(colors[idx + 1], localT);
-}
-
-function ProceduralEnvironmentSetup() {
-  const { gl, scene } = useThree();
-  useEffect(() => {
-    const pmrem = new PMREMGenerator(gl);
-    const room = new RoomEnvironment();
-    const rt = pmrem.fromScene(room, 0.04);
-    scene.environment = rt.texture;
-    scene.environmentIntensity = 0.38;
-    room.dispose();
-    pmrem.dispose();
-    return () => {
-      scene.environment = null;
-      rt.dispose();
-    };
-  }, [gl, scene]);
-  return null;
-}
-
-function AdaptiveQuality({ isMobile }: { isMobile: boolean }) {
-  const { gl } = useThree();
-  const elapsed = useRef(0);
-  const frames = useRef(0);
-  const maxDpr = isMobile ? 1.35 : 1.65;
-  const currentDpr = useRef(Math.min(window.devicePixelRatio || 1, maxDpr));
-
-  useEffect(() => {
-    currentDpr.current = Math.min(window.devicePixelRatio || 1, maxDpr);
-    gl.setPixelRatio(currentDpr.current);
-  }, [gl, maxDpr]);
-
-  useFrame((_, delta) => {
-    elapsed.current += delta;
-    frames.current += 1;
-    if (elapsed.current < 3.0) return;
-
-    const fps = frames.current / elapsed.current;
-    const nextDpr =
-      fps < 42 ? 1 : fps < 54 ? Math.min(window.devicePixelRatio || 1, 1.2) : maxDpr;
-
-    if (Math.abs(nextDpr - currentDpr.current) > 0.08) {
-      currentDpr.current = nextDpr;
-      gl.setPixelRatio(nextDpr);
-    }
-    elapsed.current = 0;
-    frames.current = 0;
-  });
-
-  return null;
 }
 
 function AtmosphereDirector({
@@ -249,7 +196,7 @@ function NebulaSkyDome({
 
   return (
     <mesh ref={domeRef} renderOrder={-10} material={material}>
-      <sphereGeometry args={[240, 48, 32]} />
+      <sphereGeometry args={[240, 32, 20]} />
     </mesh>
   );
 }
@@ -342,84 +289,24 @@ function TopographicSea({
     [],
   );
 
-  const cloudMaterial = useMemo(
-    () =>
-      new ShaderMaterial({
-        vertexShader: sanctuaryCloudVertexShader,
-        fragmentShader: sanctuaryCloudFragmentShader,
-        transparent: true,
-        depthWrite: false,
-        uniforms: {
-          uTime: { value: 0 },
-          uCloudLitColor: { value: new Color("#38bdf8") },
-          uCloudShadowColor: { value: new Color("#08142c") },
-          uHorizonColor: { value: new Color("#09152b") },
-          uSunDirection: { value: new Vector3(0.3, 0.35, -0.85) },
-        },
-      }),
-    [],
-  );
+  useEffect(() => () => material.dispose(), [material]);
 
-  useEffect(
-    () => () => {
-      material.dispose();
-      cloudMaterial.dispose();
-    },
-    [material, cloudMaterial],
-  );
-
-  const cloudPalettes = useMemo(
-    () => ({
-      lit: [
-        new Color("#ff9e64"),
-        new Color("#38bdf8"),
-        new Color("#2dd4bf"),
-        new Color("#c084fc"),
-        new Color("#fbbf24"),
-      ],
-      shadow: [
-        new Color("#1a1432"),
-        new Color("#091631"),
-        new Color("#052236"),
-        new Color("#121233"),
-        new Color("#28192b"),
-      ],
-      tmpLit: new Color(),
-      tmpShadow: new Color(),
-    }),
-    [],
-  );
-
-  useFrame(({ clock, camera }) => {
+  useFrame(({ clock }) => {
     const t = reducedMotion ? 0 : clock.getElapsedTime();
-    const s = scrollProgressRef.current;
     material.uniforms.uTime.value = t;
-    material.uniforms.uScroll.value = s;
+    material.uniforms.uScroll.value = scrollProgressRef.current;
     material.uniforms.uPointer.value.set(pointerRef.current.x, pointerRef.current.y);
     material.uniforms.uPulseAge.value =
       pulseTimeRef.current > 0 ? Math.max(0, (performance.now() - pulseTimeRef.current) * 0.001) : 0;
-
-    interpolateStops(cloudPalettes.lit, s, cloudPalettes.tmpLit);
-    interpolateStops(cloudPalettes.shadow, s, cloudPalettes.tmpShadow);
-    cloudMaterial.uniforms.uTime.value = t * 0.7;
-    cloudMaterial.uniforms.uCloudLitColor.value.lerp(cloudPalettes.tmpLit, 0.08);
-    cloudMaterial.uniforms.uCloudShadowColor.value.lerp(cloudPalettes.tmpShadow, 0.08);
-    cloudMaterial.uniforms.uHorizonColor.value.copy(cloudPalettes.tmpShadow);
-    void camera;
   });
 
-  const segX = isMobile ? 72 : 116;
-  const segZ = isMobile ? 104 : 180;
+  const segX = isMobile ? 48 : 72;
+  const segZ = isMobile ? 72 : 112;
 
   return (
-    <>
-      <mesh position={[0, -4.4, -96]} rotation={[-Math.PI / 2, 0, 0]} material={material}>
-        <planeGeometry args={[155, 265, segX, segZ]} />
-      </mesh>
-      <mesh position={[0, -7.8, -96]} rotation={[-Math.PI / 2, 0, 0]} material={cloudMaterial}>
-        <planeGeometry args={[220, 310, isMobile ? 48 : 76, isMobile ? 64 : 96]} />
-      </mesh>
-    </>
+    <mesh position={[0, -4.4, -96]} rotation={[-Math.PI / 2, 0, 0]} material={material}>
+      <planeGeometry args={[155, 265, segX, segZ]} />
+    </mesh>
   );
 }
 
@@ -432,7 +319,7 @@ function AstralParticles({
   isMobile: boolean;
   reducedMotion: boolean;
 }) {
-  const count = isMobile ? 950 : 2100;
+  const count = isMobile ? 420 : 860;
 
   const { geometry, material } = useMemo(() => {
     const random = seededRandom(42026);
@@ -535,34 +422,28 @@ function BackdropSanctuaryStation({
       metalness: 0.06,
       flatShading: true,
     });
-    const stoneMat = new MeshStandardMaterial({
+    const stoneMat = new MeshLambertMaterial({
       vertexColors: true,
-      roughness: 0.46,
-      metalness: 0.14,
     });
-    const woodMat = new MeshStandardMaterial({
+    const woodMat = new MeshLambertMaterial({
       vertexColors: true,
-      roughness: 0.7,
-      metalness: 0.08,
     });
     const goldMat = new MeshStandardMaterial({
       vertexColors: true,
       roughness: 0.24,
       metalness: 0.86,
       emissive: new Color("#f59e0b"),
-      emissiveIntensity: 0.24,
+      emissiveIntensity: 0.28,
     });
     const crystalMat = new MeshStandardMaterial({
       vertexColors: true,
       roughness: 0.16,
       metalness: 0.25,
       emissive: new Color(spec.accentPrimary),
-      emissiveIntensity: 0.56,
+      emissiveIntensity: 0.58,
     });
-    const emissiveMat = new MeshStandardMaterial({
+    const emissiveMat = new MeshLambertMaterial({
       vertexColors: true,
-      roughness: 0.18,
-      metalness: 0.1,
       emissive: new Color("#ffffff"),
       emissiveIntensity: 1.45,
     });
@@ -668,7 +549,7 @@ function BackdropSanctuaryStation({
     }> = [];
 
     for (const k of built.kinetics) {
-      let mat: MeshStandardMaterial | ShaderMaterial = goldMat;
+      let mat: MeshStandardMaterial | MeshLambertMaterial | ShaderMaterial = goldMat;
       let jellyTime: { value: number } | undefined;
       if (k.materialKind === "jellyfish") {
         jellyTime = { value: 0 };
@@ -738,9 +619,7 @@ function BackdropSanctuaryStation({
     // Grass / Kelp Instances
     if (built.grassInstances.length > 0) {
       const gGeo = createGrassBladeGeometry();
-      const gMat = new MeshStandardMaterial({
-        roughness: 0.68,
-        metalness: 0.05,
+      const gMat = new MeshLambertMaterial({
         side: DoubleSide,
       });
       const gInst = new InstancedMesh(gGeo, gMat, built.grassInstances.length);
@@ -767,9 +646,7 @@ function BackdropSanctuaryStation({
     if (built.flock && built.flock.count > 0) {
       const fs = built.flock;
       const fGeo = fs.kind === "fish" ? createFishGeometry() : createSpiritBirdGeometry();
-      const fMat = new MeshStandardMaterial({
-        roughness: 0.3,
-        metalness: 0.2,
+      const fMat = new MeshLambertMaterial({
         side: DoubleSide,
         emissive: new Color(fs.colorA),
         emissiveIntensity: 0.55,
@@ -815,10 +692,6 @@ function BackdropSanctuaryStation({
   useEffect(() => () => stationResources.disposeAll(), [stationResources]);
 
   const dummyM = useMemo(() => new Matrix4(), []);
-  const dummyP = useMemo(() => new Vector3(), []);
-  const dummyL = useMemo(() => new Vector3(), []);
-  const dummyUp = useMemo(() => new Vector3(0, 1, 0), []);
-  const dummyS = useMemo(() => new Vector3(), []);
 
   useFrame((state, delta) => {
     const root = rootRef.current;
@@ -826,7 +699,7 @@ function BackdropSanctuaryStation({
 
     // Distance-cull far stations so at most 1–2 sanctuaries render simultaneously
     const distZ = Math.abs(position[2] - state.camera.position.z);
-    const isVisible = distZ < 76;
+    const isVisible = distZ < 72;
     root.visible = isVisible;
     if (!isVisible) return;
 
@@ -837,7 +710,7 @@ function BackdropSanctuaryStation({
       const pulseAge = (performance.now() - pulseTimeRef.current) * 0.001;
       const boost = pulseAge < 2.5 ? 1 + Math.sin(Math.min(1, pulseAge / 2.2) * Math.PI) * 1.1 : 1;
       stationResources.emissiveMat.emissiveIntensity = 1.45 * boost;
-      stationResources.crystalMat.emissiveIntensity = 0.56 * boost;
+      stationResources.crystalMat.emissiveIntensity = 0.58 * boost;
     }
 
     if (!reducedMotion) {
@@ -862,22 +735,33 @@ function BackdropSanctuaryStation({
 
     if (stationResources.flockInst && stationResources.flockData.length > 0) {
       const isBirds = stationResources.built.flock?.kind === "birds";
-      stationResources.flockData.forEach((ag, i) => {
+      const te = dummyM.elements;
+      for (let i = 0; i < stationResources.flockData.length; i += 1) {
+        const ag = stationResources.flockData[i];
         const curA = ag.a + t * ag.speed;
-        const nextA = curA + (ag.speed >= 0 ? 0.08 : -0.08);
-        dummyP.set(
-          Math.cos(curA) * ag.r,
-          ag.h + Math.sin(t * 2.0 + ag.phase) * 0.35,
-          Math.sin(curA) * ag.r,
-        );
-        dummyL.set(Math.cos(nextA) * ag.r, dummyP.y, Math.sin(nextA) * ag.r);
-        dummyM.lookAt(dummyL, dummyP, dummyUp);
+        const c = Math.cos(curA);
+        const s = Math.sin(curA);
+        const dir = ag.speed >= 0 ? 1 : -1;
+        const sc = ag.scale;
         const flap = isBirds && !reducedMotion ? 0.76 + 0.32 * Math.sin(t * 7.2 + ag.phase) : 1.0;
-        dummyS.set(ag.scale, ag.scale * flap, ag.scale);
-        dummyM.scale(dummyS);
-        dummyM.setPosition(dummyP);
-        stationResources.flockInst!.setMatrixAt(i, dummyM);
-      });
+        te[0] = dir * c * sc;
+        te[1] = 0;
+        te[2] = dir * s * sc;
+        te[3] = 0;
+        te[4] = 0;
+        te[5] = sc * flap;
+        te[6] = 0;
+        te[7] = 0;
+        te[8] = -dir * s * sc;
+        te[9] = 0;
+        te[10] = dir * c * sc;
+        te[11] = 0;
+        te[12] = c * ag.r;
+        te[13] = ag.h + Math.sin(t * 2.0 + ag.phase) * 0.35;
+        te[14] = s * ag.r;
+        te[15] = 1;
+        stationResources.flockInst.setMatrixAt(i, dummyM);
+      }
       stationResources.flockInst.instanceMatrix.needsUpdate = true;
     }
   });
@@ -893,12 +777,24 @@ export function WorldScene(props: WorldSceneProps) {
   const [pageVisible, setPageVisible] = useState(() =>
     typeof document === "undefined" ? true : !document.hidden,
   );
+  const [mountedStage, setMountedStage] = useState(() =>
+    props.reducedMotion || props.scrollProgressRef.current > 0.04 ? 4 : 0,
+  );
 
   useEffect(() => {
     const onVisibility = () => setPageVisible(!document.hidden);
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
+
+  // Stagger building off-screen stations 01..04 across idle frames so first paint is instant
+  useEffect(() => {
+    if (mountedStage >= 4) return;
+    const timer = window.setTimeout(() => {
+      setMountedStage((prev) => Math.min(4, prev + 1));
+    }, 110);
+    return () => window.clearTimeout(timer);
+  }, [mountedStage]);
 
   const heroWorldId: WorldId = props.heroWorldId ?? "aether-sanctuary";
   const m = props.isMobile;
@@ -907,9 +803,9 @@ export function WorldScene(props: WorldSceneProps) {
     <Canvas
       className="world-canvas"
       frameloop={pageVisible ? "always" : "never"}
-      dpr={[1, m ? 1.35 : 1.65]}
+      dpr={[1, m ? 1 : 1.25]}
       camera={{ position: [-1.6, 4.1, 7.2], fov: 48, near: 0.1, far: 340 }}
-      gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
+      gl={{ antialias: !m, alpha: true, powerPreference: "high-performance", stencil: false }}
       onCreated={({ gl }) => {
         gl.setClearColor(0x000000, 0);
         gl.outputColorSpace = SRGBColorSpace;
@@ -918,10 +814,8 @@ export function WorldScene(props: WorldSceneProps) {
       }}
     >
       <fogExp2 attach="fog" args={["#071126", 0.0086]} />
-      <ProceduralEnvironmentSetup />
       <AtmosphereDirector scrollProgressRef={props.scrollProgressRef} heroWorldId={heroWorldId} />
 
-      <AdaptiveQuality isMobile={m} />
       <NebulaSkyDome
         scrollProgressRef={props.scrollProgressRef}
         pulseTimeRef={props.pulseTimeRef}
@@ -951,40 +845,48 @@ export function WorldScene(props: WorldSceneProps) {
       />
 
       {/* Station 01 (Imagine): Chronos Astrolabe Citadel */}
-      <BackdropSanctuaryStation
-        worldId="astral-citadel"
-        position={[m ? 0.0 : 5.8, -0.1, -57.5]}
-        yaw={-0.32}
-        scale={m ? 0.30 : 0.40}
-        reducedMotion={props.reducedMotion}
-      />
+      {mountedStage >= 1 && (
+        <BackdropSanctuaryStation
+          worldId="astral-citadel"
+          position={[m ? 0.0 : 5.8, -0.1, -57.5]}
+          yaw={-0.32}
+          scale={m ? 0.30 : 0.40}
+          reducedMotion={props.reducedMotion}
+        />
+      )}
 
       {/* Station 02 (Alive): Bioluminescent Abyssal Sanctuary */}
-      <BackdropSanctuaryStation
-        worldId="abyssal-garden"
-        position={[m ? 0.0 : -5.8, -0.45, -97.5]}
-        yaw={0.35}
-        scale={m ? 0.30 : 0.40}
-        reducedMotion={props.reducedMotion}
-      />
+      {mountedStage >= 2 && (
+        <BackdropSanctuaryStation
+          worldId="abyssal-garden"
+          position={[m ? 0.0 : -5.8, -0.45, -97.5]}
+          yaw={0.35}
+          scale={m ? 0.30 : 0.40}
+          reducedMotion={props.reducedMotion}
+        />
+      )}
 
       {/* Station 03 (Connect): Aurora Crystal Fjord */}
-      <BackdropSanctuaryStation
-        worldId="aurora-prism"
-        position={[m ? 0.0 : 5.8, -0.35, -137.5]}
-        yaw={-0.34}
-        scale={m ? 0.30 : 0.40}
-        reducedMotion={props.reducedMotion}
-      />
+      {mountedStage >= 3 && (
+        <BackdropSanctuaryStation
+          worldId="aurora-prism"
+          position={[m ? 0.0 : 5.8, -0.35, -137.5]}
+          yaw={-0.34}
+          scale={m ? 0.30 : 0.40}
+          reducedMotion={props.reducedMotion}
+        />
+      )}
 
       {/* Station 04 (About): Solaris Mirage Oasis */}
-      <BackdropSanctuaryStation
-        worldId="solaris-oasis"
-        position={[m ? 0.0 : 4.4, 0.35, -177.5]}
-        yaw={-0.28}
-        scale={m ? 0.31 : 0.41}
-        reducedMotion={props.reducedMotion}
-      />
+      {mountedStage >= 4 && (
+        <BackdropSanctuaryStation
+          worldId="solaris-oasis"
+          position={[m ? 0.0 : 4.4, 0.35, -177.5]}
+          yaw={-0.28}
+          scale={m ? 0.31 : 0.41}
+          reducedMotion={props.reducedMotion}
+        />
+      )}
     </Canvas>
   );
 }

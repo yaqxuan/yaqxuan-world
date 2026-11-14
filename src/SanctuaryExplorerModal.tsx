@@ -186,14 +186,17 @@ export function SanctuaryExplorerModal({
       antialias: true,
       powerPreference: "high-performance",
       preserveDrawingBuffer: captureMode,
+      stencil: false,
     });
-    renderer.setPixelRatio(captureMode ? 1.5 : Math.min(window.devicePixelRatio || 1, 1.75));
+    renderer.setPixelRatio(captureMode ? 1.5 : Math.min(window.devicePixelRatio || 1, 1.3));
     renderer.setSize(width, height);
     renderer.outputColorSpace = SRGBColorSpace;
     renderer.toneMapping = ACESFilmicToneMapping;
     renderer.toneMappingExposure = 0.92;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = PCFSoftShadowMap;
+    renderer.shadowMap.autoUpdate = false;
+    renderer.shadowMap.needsUpdate = true;
     container.innerHTML = "";
     container.appendChild(renderer.domElement);
 
@@ -224,19 +227,24 @@ export function SanctuaryExplorerModal({
     controls.maxPolarAngle = Math.PI * 0.56;
     controls.update();
 
-    // Post-processing Composer with calibrated HDR UnrealBloomPass (only true HDR > 1.02 blooms!)
-    const composer = new EffectComposer(renderer);
-    const renderPass = new RenderPass(scene, camera);
-    const bloomPass = new UnrealBloomPass(
-      new Vector2(width, height),
-      0.24, // strength
-      0.46, // radius
-      1.02, // threshold
-    );
-    const outputPass = new OutputPass();
-    composer.addPass(renderPass);
-    composer.addPass(bloomPass);
-    composer.addPass(outputPass);
+    // Post-processing Composer is allocated ONLY in HD offline captureMode; interactive roaming renders directly at 60–120 FPS!
+    let composer: EffectComposer | null = null;
+    let bloomPass: UnrealBloomPass | null = null;
+    let outputPass: OutputPass | null = null;
+    if (captureMode) {
+      composer = new EffectComposer(renderer);
+      const renderPass = new RenderPass(scene, camera);
+      bloomPass = new UnrealBloomPass(
+        new Vector2(width, height),
+        0.24, // strength
+        0.46, // radius
+        1.02, // threshold
+      );
+      outputPass = new OutputPass();
+      composer.addPass(renderPass);
+      composer.addPass(bloomPass);
+      composer.addPass(outputPass);
+    }
 
     // Sky Dome
     const skyMat = new ShaderMaterial({
@@ -268,7 +276,7 @@ export function SanctuaryExplorerModal({
 
     const sunLight = new DirectionalLight("#ffd166", 2.5);
     sunLight.castShadow = true;
-    sunLight.shadow.mapSize.set(2048, 2048);
+    sunLight.shadow.mapSize.set(captureMode ? 2048 : 1024, captureMode ? 2048 : 1024);
     sunLight.shadow.camera.near = 2;
     sunLight.shadow.camera.far = 115;
     const shadowBound = 32;
@@ -290,14 +298,10 @@ export function SanctuaryExplorerModal({
     const worldGroup = new Group();
     scene.add(worldGroup);
 
-    const disposables: Array<{ dispose: () => void }> = [
-      skyMat,
-      skyGeo,
-      envRT,
-      composer,
-      bloomPass,
-      outputPass,
-    ];
+    const disposables: Array<{ dispose: () => void }> = [skyMat, skyGeo, envRT];
+    if (composer && bloomPass && outputPass) {
+      disposables.push(composer, bloomPass, outputPass);
+    }
 
     // Static PBR Material Buckets
     const terrainMat = new MeshStandardMaterial({
@@ -363,7 +367,8 @@ export function SanctuaryExplorerModal({
     // Cloud Sea (for floating sky realms)
     let cloudMat: ShaderMaterial | null = null;
     if (currentSpec.hasCloudSea) {
-      const cloudGeo = new PlaneGeometry(390, 390, 96, 96);
+      const cloudSegs = captureMode ? 96 : 56;
+      const cloudGeo = new PlaneGeometry(390, 390, cloudSegs, cloudSegs);
       cloudGeo.rotateX(-Math.PI / 2);
       cloudMat = new ShaderMaterial({
         vertexShader: sanctuaryCloudVertexShader,
@@ -387,7 +392,7 @@ export function SanctuaryExplorerModal({
     // Water Bodies
     const waterMaterials: ShaderMaterial[] = [];
     for (const wb of built.waterBodies) {
-      const wGeo = createWaterDiscGeometry(wb.radius, 56);
+      const wGeo = createWaterDiscGeometry(wb.radius, captureMode ? 56 : 40);
       const wMat = new ShaderMaterial({
         vertexShader: sanctuaryWaterVertexShader,
         fragmentShader: sanctuaryWaterFragmentShader,
@@ -537,7 +542,7 @@ export function SanctuaryExplorerModal({
       };
 
       const inst = new InstancedMesh(baseClusterGeo, clusterMat, built.canopyClusters.length);
-      inst.castShadow = true;
+      inst.castShadow = captureMode;
       inst.receiveShadow = true;
       const m4 = new Matrix4();
       const q = new Quaternion();
@@ -701,23 +706,23 @@ export function SanctuaryExplorerModal({
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
-      composer.setSize(w, h);
-      bloomPass.setSize(w, h);
+      if (composer && bloomPass) {
+        composer.setSize(w, h);
+        bloomPass.setSize(w, h);
+      }
     };
     window.addEventListener("resize", onResize);
 
     const atmo = createEmptyAtmosphere();
     const dummyM = new Matrix4();
-    const dummyP = new Vector3();
-    const dummyLook = new Vector3();
     const dummyUp = new Vector3(0, 1, 0);
-    const dummyS = new Vector3();
     const forwardVec = new Vector3();
     const rightVec = new Vector3();
 
     let rafId = 0;
     let prevNow = performance.now();
     let renderFrames = 0;
+    let lastShadowPhase = -1;
 
     const renderTick = (now: number) => {
       const dt = Math.min(0.05, (now - prevNow) * 0.001);
@@ -725,6 +730,12 @@ export function SanctuaryExplorerModal({
       const elapsed = captureMode ? 4.2 : now * 0.001;
 
       sampleWorldAtmosphere(worldId, phaseRef.current, atmo);
+
+      // Only re-rasterize shadow map on initial frames or when sun phase changes!
+      if (renderFrames < 2 || Math.abs(phaseRef.current - lastShadowPhase) > 0.0008) {
+        lastShadowPhase = phaseRef.current;
+        renderer.shadowMap.needsUpdate = true;
+      }
 
       // Sync Sky, Fog, Sun & Bounce Lights
       skyMesh.position.copy(camera.position);
@@ -793,23 +804,34 @@ export function SanctuaryExplorerModal({
         }
       }
 
-      // Update Orbiting Birds / Fish School
+      // Update Orbiting Birds / Fish School with zero-allocation yaw basis write
       if (flockInstanced && flockAgents.length > 0) {
+        const isBirds = built.flock?.kind === "birds";
+        const te = dummyM.elements;
         for (let i = 0; i < flockAgents.length; i += 1) {
           const ag = flockAgents[i];
           const curA = ag.angle + elapsed * ag.speed;
-          const nextA = curA + (ag.speed >= 0 ? 0.08 : -0.08);
-          dummyP.set(
-            Math.cos(curA) * ag.radius,
-            ag.height + Math.sin(elapsed * 2.1 + ag.bobPhase) * 0.42,
-            Math.sin(curA) * ag.radius,
-          );
-          dummyLook.set(Math.cos(nextA) * ag.radius, dummyP.y, Math.sin(nextA) * ag.radius);
-          dummyM.lookAt(dummyLook, dummyP, dummyUp);
-          const flap = built.flock?.kind === "birds" ? 0.75 + 0.35 * Math.sin(elapsed * 7.5 + ag.bobPhase) : 1.0;
-          dummyS.set(ag.scale, ag.scale * flap, ag.scale);
-          dummyM.scale(dummyS);
-          dummyM.setPosition(dummyP);
+          const c = Math.cos(curA);
+          const s = Math.sin(curA);
+          const dir = ag.speed >= 0 ? 1 : -1;
+          const sc = ag.scale;
+          const flap = isBirds ? 0.75 + 0.35 * Math.sin(elapsed * 7.5 + ag.bobPhase) : 1.0;
+          te[0] = dir * c * sc;
+          te[1] = 0;
+          te[2] = dir * s * sc;
+          te[3] = 0;
+          te[4] = 0;
+          te[5] = sc * flap;
+          te[6] = 0;
+          te[7] = 0;
+          te[8] = -dir * s * sc;
+          te[9] = 0;
+          te[10] = dir * c * sc;
+          te[11] = 0;
+          te[12] = c * ag.radius;
+          te[13] = ag.height + Math.sin(elapsed * 2.1 + ag.bobPhase) * 0.42;
+          te[14] = s * ag.radius;
+          te[15] = 1;
           flockInstanced.setMatrixAt(i, dummyM);
         }
         flockInstanced.instanceMatrix.needsUpdate = true;
@@ -856,7 +878,11 @@ export function SanctuaryExplorerModal({
         controls.update();
       }
 
-      composer.render();
+      if (composer) {
+        composer.render();
+      } else {
+        renderer.render(scene, camera);
+      }
       renderFrames += 1;
 
       if (captureMode) {

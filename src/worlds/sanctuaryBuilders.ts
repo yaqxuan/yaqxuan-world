@@ -515,7 +515,7 @@ function buildAetherSanctuary(seed: number, detail: WorldDetailTier): BuiltSanct
 
   // Lush wind-swaying grass
   scatterGrassOnCircle({
-    count: isUltra ? 8800 : 1200,
+    count: isUltra ? 8800 : 420,
     center: [0, 0, 0],
     minR: 7.7,
     maxR: 15.2,
@@ -527,7 +527,7 @@ function buildAetherSanctuary(seed: number, detail: WorldDetailTier): BuiltSanct
   });
   for (const isl of subIslands) {
     scatterGrassOnCircle({
-      count: isUltra ? 1400 : 240,
+      count: isUltra ? 1400 : 90,
       center: isl.center,
       minR: 2.2,
       maxR: isl.radius * 0.88,
@@ -769,7 +769,7 @@ function buildAstralCitadel(seed: number, detail: WorldDetailTier): BuiltSanctua
 
   // Luminous golden-blue astral grass/reeds around outer platform ring
   scatterGrassOnCircle({
-    count: isUltra ? 6200 : 900,
+    count: isUltra ? 6200 : 320,
     center: [0, -0.4, 0],
     minR: 8.8,
     maxR: 13.0,
@@ -784,7 +784,7 @@ function buildAstralCitadel(seed: number, detail: WorldDetailTier): BuiltSanctua
 
   // Swirling celestial crystal shards in canopyClusters
   const shardColors = [new Color("#38bdf8"), new Color("#fbbf24"), new Color("#818cf8")];
-  const orbitCrystalCount = isUltra ? 260 : 80;
+  const orbitCrystalCount = isUltra ? 260 : 42;
   for (let i = 0; i < orbitCrystalCount; i += 1) {
     const ang = (i / orbitCrystalCount) * Math.PI * 6 + rng() * 0.3;
     const r = 10.8 + Math.sin(i * 0.37) * 3.5 + rng() * 2.4;
@@ -1005,7 +1005,7 @@ function buildAbyssalGarden(seed: number, detail: WorldDetailTier): BuiltSanctua
 
   // Swaying Kelp & Sea-Grass Meadow (kept clear of inner pearl rotunda)
   scatterGrassOnCircle({
-    count: isUltra ? 5200 : 880,
+    count: isUltra ? 5200 : 340,
     center: [0, 0, 0],
     minR: 6.4,
     maxR: 21.0,
@@ -1037,7 +1037,7 @@ function buildAbyssalGarden(seed: number, detail: WorldDetailTier): BuiltSanctua
     ],
     flock: {
       kind: "fish",
-      count: isUltra ? 650 : 160,
+      count: isUltra ? 650 : 48,
       orbitRadius: [5.5, 19.5],
       heightRange: [1.2, 9.5],
       colorA: "#fde047",
@@ -1200,7 +1200,7 @@ function buildAuroraPrism(seed: number, detail: WorldDetailTier): BuiltSanctuary
 
   // Crystalline frost-grass on central island & shoreline
   scatterGrassOnCircle({
-    count: isUltra ? 5800 : 850,
+    count: isUltra ? 5800 : 320,
     center: [0, 0, 0],
     minR: 1.8,
     maxR: 6.2,
@@ -1430,7 +1430,7 @@ function buildSolarisOasis(seed: number, detail: WorldDetailTier): BuiltSanctuar
 
   // Lush oasis shoreline reeds
   scatterGrassOnCircle({
-    count: isUltra ? 5200 : 800,
+    count: isUltra ? 5200 : 300,
     center: [0, 0, 4.2],
     minR: 6.8,
     maxR: 12.8,
@@ -1656,7 +1656,7 @@ function buildEmeraldTerraces(seed: number, detail: WorldDetailTier): BuiltSanct
 
   // Lush sunlit emerald grass & golden wildflowers along outer meadow & satellite island
   scatterGrassOnCircle({
-    count: isUltra ? 7400 : 1100,
+    count: isUltra ? 7400 : 380,
     center: [0, -0.6, 0],
     minR: 13.6,
     maxR: 16.8,
@@ -1668,7 +1668,7 @@ function buildEmeraldTerraces(seed: number, detail: WorldDetailTier): BuiltSanct
     out: grassInstances,
   });
   scatterGrassOnCircle({
-    count: isUltra ? 1800 : 280,
+    count: isUltra ? 1800 : 100,
     center: [22.2, 2.0, 4.8],
     minR: 1.5,
     maxR: 5.5,
